@@ -30,19 +30,13 @@ __global__ void convolute(float* out, float* in , float* kernel, int radius, int
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     int c = threadIdx.z + blockDim.z * blockIdx.z;
-    int index = x + width * y + c * width * height;
-    float con_sum = 0.f;
+    int bw = blockDim.x;
+    int bh = blockDim.y;
+    int bd = blockDim.z;
+    int ix = threadIdx.x;
+    int iy = threadIdx.y;
+    int ic = threadIdx.z;
     int diam = 2 * radius + 1;
-    if (x < width && y < height) {
-        for (int i = -radius; i <= radius; i++) {
-            for (int j = -radius; j <= radius; j++) {
-                int xc = fmax(fmin((float)(width-1), (float)(x+j)), 0.f);
-                int yc = fmax(fmin((float)(height-1), (float)(y+i)), 0.f);
-                con_sum += in[xc + yc * width + c * width * height] * kernel[(j+radius) + (i+radius) * diam];
-            }
-        }
-        out[index] = con_sum;
-    }
 }
 
 void gaussian_kernel(float* kernel, float sigma, int radius, int diameter) {
@@ -243,13 +237,19 @@ int main(int argc, char **argv)
     // dim3 block = dim3(32, 8, 1);
     // dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, 1);
 
-    float min = aMin(h_kernel, diameter);
-    float max = aMax(h_kernel, diameter);
+    // float min = aMin(h_kernel, diameter);
+    // float max = aMax(h_kernel, diameter);
 
     Timer timer; timer.start();
     for (int i = 0; i < repeats; i++) {
         convolute <<<grid, block>>> (d_imgOut, d_imgIn, d_kernel, radius, w, h, nc);
         // convolution(h_imgOut, h_imgIn, h_kernel, radius, w, h, nc);
+        // for (int k = 0; k < diameter; k++) {
+        //     for (int j = 0; j < diameter; j++) {
+        //         gaussOut.at<uchar>(k, j) = (h_kernel[j + k * diameter]-min) / (max - min) * 255;
+        //     }
+        //     cout << endl;
+        // }
     }
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
@@ -267,11 +267,6 @@ int main(int argc, char **argv)
     CUDA_CHECK;
 
 
-    for (int k = 0; k < diameter; k++) {
-        for (int j = 0; j < diameter; j++) {
-            gaussOut.at<uchar>(k, j) = (h_kernel[j + k * diameter] - min) / (max - min) * 255;
-        }
-    }
     // show input image
     showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
 
@@ -279,7 +274,7 @@ int main(int argc, char **argv)
     convert_layered_to_mat(mOut, h_imgOut);
     // convert_layered_to_mat(gaussOut, h_kernel);
     showImage("Output", mOut, 100+w+40, 100);
-    showImage("Gauss", gaussOut, 200, 200);
+    // showImage("Output", gaussOut, 100, 100);
 
     // ### Display your own output images here as needed
 
@@ -294,7 +289,6 @@ int main(int argc, char **argv)
     // save input and result
     cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
     cv::imwrite("image_result.png",mOut*255.f);
-    cv::imwrite("gauss.png",gaussOut);
 
     // free allocated arrays
     delete[] h_imgIn;

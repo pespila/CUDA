@@ -1,18 +1,3 @@
-// Exercise 1
-1)  Console output:
-	nvcc: NVIDIA (R) Cuda compiler driver
-	Copyright (c) 2005-2015 NVIDIA Corporation
-	Built on Mon_Feb_16_22:59:02_CST_2015
-	Cuda compilation tools, release 7.0, V7.0.27
-
-2a) Device 0: "GeForce GTX 750 Ti"
-	CUDA Driver Version / Runtime Version          7.0 / 7.0
-	CUDA Capability Major/Minor version number:    5.0
-2b) ( 5) Multiprocessors, (128) CUDA Cores/MP:     640 CUDA Cores
-2c) Total amount of global memory:                 2047 MBytes (2146762752 bytes)
-2d) Total number of registers available per block: 65536
-	Total amount of shared memory per block:       49152 bytes
-
 // Exercise 2
 3.)
 Square Arrays:

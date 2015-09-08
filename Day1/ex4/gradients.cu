@@ -34,6 +34,19 @@ __global__ void addArray(float* out, float* in1, float* in2, int size) {
     }
 }
 
+__global__ void l2(float* out, float* in, int width, int height, int channel) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int index = x + width * y;
+    float sum = 0.0;
+    if (x < width && y < height) {
+        for (int i = 0; i < channel; i++) {
+            sum += pow(in[index + i * height * width], 2);
+        }
+        out[index] = sqrtf(sum);
+    }
+}
+
 __global__ void del_x_plus(float* out, float* in, int width, int height) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -148,6 +161,7 @@ int main(int argc, char **argv)
     // ###
     // ###
     cv::Mat mOut(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
+    cv::Mat mOut2(h, w, CV_8UC1);  // mOut will have the same number of channels as the input image, nc layers
     //cv::Mat mOut(h,w,CV_32FC3);    // mOut will be a color image, 3 layers
     //cv::Mat mOut(h,w,CV_32FC1);    // mOut will be a grayscale image, 1 layer
     // ### Define your own output images here as needed
@@ -162,6 +176,7 @@ int main(int argc, char **argv)
     float *h_imgIn  = new float[(size_t)size];
     // allocate raw output array (the computation result will be stored in this array, then later converted to mOut for displaying)
     float *h_imgOut = new float[(size_t)w*h*mOut.channels()];
+    float *h_absum = new float[(size_t)w*h];
 
     // allocate raw input image for GPU
     float* d_imgIn;
@@ -169,6 +184,7 @@ int main(int argc, char **argv)
     float* d_imgOut2;
     float* d_imgOut3;
     float* d_sum;
+    float* d_absum;
 
     // For camera mode: Make a loop to read in camera frames
 #ifdef CAMERA
@@ -202,6 +218,8 @@ int main(int argc, char **argv)
     CUDA_CHECK;
     cudaMalloc(&d_sum, nbyte);
     CUDA_CHECK;
+    cudaMalloc(&d_absum, w*h*sizeof(float));
+    CUDA_CHECK;
 
     // copy host memory
     cudaMemcpy(d_imgIn, h_imgIn, nbyte, cudaMemcpyHostToDevice);
@@ -209,10 +227,13 @@ int main(int argc, char **argv)
 
     // launch kernel
     dim3 block = dim3(32, 8, nc);
-    dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, 1);
+    dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, (nc + block.z - 1) / block.z);
 
     dim3 block_sum_up = dim3(256, 1, 1);
     dim3 grid_sum_up = dim3((size + block_sum_up.x - 1) / block_sum_up.x, 1, 1);
+
+    dim3 block_l2 = dim3(32, 8, 1);
+    dim3 grid_l2 = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, 1);
 
     Timer timer; timer.start();
 
@@ -222,19 +243,37 @@ int main(int argc, char **argv)
         del_x_minus <<<grid, block>>> (d_imgOut3, d_imgOut1, w, h);
         del_y_minus <<<grid, block>>> (d_imgOut1, d_imgOut2, w, h);
         addArray <<<grid_sum_up, block_sum_up>>> (d_sum, d_imgOut1, d_imgOut3, size);
+        l2 <<<grid_l2, block_l2 >>> (d_absum, d_sum, w, h, nc);
     }
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
     cout << "time: " << t*1000 << " ms" << endl;
 
+    cudaMemcpy(h_absum, d_absum, w*h*sizeof(float), cudaMemcpyDeviceToHost);
+    CUDA_CHECK;
     cudaMemcpy(h_imgOut, d_sum, nbyte, cudaMemcpyDeviceToHost);
     CUDA_CHECK;
 
+    for (int i = 0; i < h; i++)
+    {
+        for (int j = 0; j < w; j++)
+        {
+            mOut2.at<uchar>(i, j) = h_absum[j + i * w]*255;
+        }
+    }
+
     // free GPU memory
     cudaFree(d_imgIn);
+    CUDA_CHECK;
     cudaFree(d_sum);
+    CUDA_CHECK;
+    cudaFree(d_absum);
+    CUDA_CHECK;
     cudaFree(d_imgOut1);
+    CUDA_CHECK;
     cudaFree(d_imgOut2);
+    CUDA_CHECK;
+    cudaFree(d_imgOut3);
     CUDA_CHECK;
 
 
@@ -242,8 +281,9 @@ int main(int argc, char **argv)
     showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
 
     // show output image: first convert to interleaved opencv format from the layered raw array
-    convert_layered_to_mat(mOut, h_imgOut);
-    showImage("Output", mOut, 100+w+40, 100);
+    // convert_layered_to_mat(mOut, h_imgOut);
+    showImage("Output", mOut2, 100+w+40, 100);
+    // showImage("Output", mOut, 100+w+40, 100);
 
     // ### Display your own output images here as needed
 
@@ -262,6 +302,7 @@ int main(int argc, char **argv)
     // free allocated arrays
     delete[] h_imgIn;
     delete[] h_imgOut;
+    delete[] h_absum;
 
     // close all opencv windows
     cvDestroyAllWindows();
