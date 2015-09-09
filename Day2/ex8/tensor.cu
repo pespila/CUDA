@@ -45,6 +45,41 @@ __global__ void compute_matrix(float* m11, float* m12, float* m22, float* in_x, 
     }
 }
 
+__global__ void mark_image(float* out, float* in, float* lambda1, float* lambda2, float alpha, float beta, int width, int height, int c) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int index = x + width * y;
+    float r_value = 0.f;
+    float g_value = 0.f;
+    float b_value = 0.f;
+    if (x < width && y < height) {
+        if (alpha <= lambda1[index] && alpha <= lambda2[index]) {
+            r_value = 255.f;
+        } else if (lambda1[index] <= beta && alpha <= lambda2[index]) {
+            g_value = 255.f;
+        } else {
+            r_value = in[index + 0 * width * height] * 0.5;
+            g_value = in[index + 1 * width * height] * 0.5;
+            b_value = in[index + 2 * width * height] * 0.5;
+        }
+    out[index + 0 * width * height] = r_value;
+    out[index + 1 * width * height] = g_value;
+    out[index + 2 * width * height] = b_value;
+    }
+}
+
+__global__ void eigenvalue(float* lambda1, float* lambda2, float* m11, float* m12, float* m22, int width, int height) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int index = x + width * y;
+    if (x < width && y < height) {
+        float M = m11[index] + m22[index];
+        float D = m11[index] * m22[index] - m12[index] * m12[index];
+        lambda1[index] = M / 2 + sqrtf((M*M) / 4 - D);
+        lambda2[index] = M / 2 - sqrtf((M*M) / 4 - D);
+    }
+}
+
 __global__ void del_x_plus(float* out, float* in, int width, int height) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -140,6 +175,16 @@ int main(int argc, char **argv)
     int radius = ceil(3 * sigma);
     int diameter = 2 * radius + 1;
 
+    // load the input image as grayscale if "-gray" is specifed
+    float alpha = pow(10, -2);
+    getParam("alpha", alpha, argc, argv);
+    cout << "alpha: " << alpha << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float beta = pow(10, -3);
+    getParam("beta", beta, argc, argv);
+    cout << "beta: " << beta << endl;
+
     // Init camera / Load input image
 #ifdef CAMERA
 
@@ -216,6 +261,8 @@ int main(int argc, char **argv)
     float* d_m11conv;
     float* d_m12conv;
     float* d_m22conv;
+    float* d_lambda1;
+    float* d_lambda2;
 
     // For camera mode: Make a loop to read in camera frames
 #ifdef CAMERA
@@ -261,6 +308,10 @@ int main(int argc, char **argv)
     CUDA_CHECK;
     cudaMalloc(&d_m22conv, w*h*sizeof(float));
     CUDA_CHECK;
+    cudaMalloc(&d_lambda1, w*h*sizeof(float));
+    CUDA_CHECK;
+    cudaMalloc(&d_lambda2, w*h*sizeof(float));
+    CUDA_CHECK;
 
     gaussian_kernel(h_kernel, sigma, radius, diameter);
     // copy host memory
@@ -284,29 +335,15 @@ int main(int argc, char **argv)
         convolute <<<grid_matrix, block_matrix>>> (d_m11conv, d_m11, d_kernel, radius, w, h, 1);
         convolute <<<grid_matrix, block_matrix>>> (d_m12conv, d_m12, d_kernel, radius, w, h, 1);
         convolute <<<grid_matrix, block_matrix>>> (d_m22conv, d_m22, d_kernel, radius, w, h, 1);
+        eigenvalue <<<grid_matrix, block_matrix>>> (d_lambda1, d_lambda2, d_m11conv, d_m12conv, d_m22conv, w, h);
+        mark_image <<<grid, block>>> (d_imgOut, d_imgIn, d_lambda1, d_lambda2, alpha, beta, w, h, nc);
     }
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
     cout << "time: " << t*1000 << " ms" << endl;
 
-    // cudaMemcpy(h_imgOut, d_imgOut, nbyte, cudaMemcpyDeviceToHost);
-    // CUDA_CHECK;
-    // cudaMemcpy(h_imgOut, d_delY, nbyte, cudaMemcpyDeviceToHost);
-    // CUDA_CHECK;
-    cudaMemcpy(h_m11, d_m11conv, w*h*sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_imgOut, d_imgOut, nbyte, cudaMemcpyDeviceToHost);
     CUDA_CHECK;
-    cudaMemcpy(h_m12, d_m12conv, w*h*sizeof(float), cudaMemcpyDeviceToHost);
-    CUDA_CHECK;
-    cudaMemcpy(h_m22, d_m22conv, w*h*sizeof(float), cudaMemcpyDeviceToHost);
-    CUDA_CHECK;
-
-    for (int i = 0; i < h; i++) {
-        for (int j = 0; j < w; j++) {
-            M11.at<uchar>(i, j) = h_m11[j + i * w] * 255; // > 0 ? h_m11[j + i * w] * 255 : 0;
-            M12.at<uchar>(i, j) = h_m12[j + i * w] * 255; // > 0 ? h_m12[j + i * w] * 255 : 0;
-            M22.at<uchar>(i, j) = h_m22[j + i * w] * 255; // > 0 ? h_m22[j + i * w] * 255 : 0;
-        }
-    }
 
     // free GPU memory
     cudaFree(d_imgIn);
@@ -327,17 +364,17 @@ int main(int argc, char **argv)
     CUDA_CHECK;
     cudaFree(d_m22conv);
     CUDA_CHECK;
+    cudaFree(d_lambda1);
+    CUDA_CHECK;
+    cudaFree(d_lambda2);
+    CUDA_CHECK;
 
     // show input image
     showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
 
     // show output image: first convert to interleaved opencv format from the layered raw array
-    // convert_layered_to_mat(M11, h_m11);
-    showImage("M11", M11, 100+w+40, 100);
-    showImage("M12", M12, 100, 100+h+40);
-    showImage("M22", M22, 100+w+40, 100+h+40);
-    // convert_layered_to_mat(mOut, h_imgOut);
-    // showImage("Output", mOut, 100+w+40, 100);
+    convert_layered_to_mat(mOut, h_imgOut);
+    showImage("Output", mOut, 100+w+40, 100);
 
     // ### Display your own output images here as needed
 
@@ -351,15 +388,15 @@ int main(int argc, char **argv)
 
     // save input and result
     cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
-    cv::imwrite("image_M11.png",M11);
-    cv::imwrite("image_M12.png",M12);
-    cv::imwrite("image_M22.png",M22);
+    cv::imwrite("image_result.png",mOut*255.f);  // "imwrite" assumes channel range [0,255]
 
     // free allocated arrays
     delete[] h_imgIn;
     delete[] h_imgOut;
     delete[] h_kernel;
     delete[] h_m11;
+    delete[] h_m12;
+    delete[] h_m22;
 
     // close all opencv windows
     cvDestroyAllWindows();
