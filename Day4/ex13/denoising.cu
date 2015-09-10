@@ -26,78 +26,117 @@ using namespace std;
 // uncomment to use the camera
 // #define CAMERA
 
-__global__ void compute_matrix(float* m11, float* m12, float* m22, float* in_x, float* in_y, int width, int height, int channel) {
-    int x = threadIdx.x + blockDim.x * blockIdx.x;
-    int y = threadIdx.y + blockDim.y * blockIdx.y;
-    int index = x + width * y;
-    float sum_m11 = 0.0;
-    float sum_m12 = 0.0;
-    float sum_m22 = 0.0;
-    if (x < width && y < height) {
-        for (int i = 0; i < channel; i++) {
-            sum_m11 += pow(in_x[index + i * height * width], 2);
-            sum_m12 += in_x[index + i * height * width] * in_y[index + i * height * width];
-            sum_m22 += pow(in_y[index + i * height * width], 2);
-        }
-        m11[index] = sum_m11;
-        m12[index] = sum_m12;
-        m22[index] = sum_m22;
-    }
-}
-
-__global__ void del_x_plus(float* out, float* in, int width, int height) {
+__global__ void fillG(float* G, float* src, float eps, int width, int height) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     int c = threadIdx.z + blockDim.z * blockIdx.z;
+
     int index = x + width * y + width * height * c;
+    int index_x = x+1 + width * y + width * height * c;
+    int index_y = x + width * (y+1) + width * height * c;
+
+    float delx, dely, l2;
+
     if (x < width && y < height) {
-        out[index] = x < width + 1 ? in[x+1 + width * y + width * height * c] - in[index] : 0.f;
+        delx = x < width + 1 ? src[index_x] - src[index] : 0.f;
+        dely = y < height + 1 ? src[index_y] - src[index] : 0.f;
+
+        l2 = sqrtf(delx*delx + dely*dely);
+        G[index] = 1.f / fmax(eps, l2);
     }
 }
 
-__global__ void del_y_plus(float* out, float* in, int width, int height) {
+__global__ void jacobi(float* out, float* in, float* f, float* G, float lambda, float eps, int width, int height) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     int c = threadIdx.z + blockDim.z * blockIdx.z;
+
     int index = x + width * y + width * height * c;
+    int indexXM = (x-1) + width * y + width * height * c;
+    int indexXP = (x+1) + width * y + width * height * c;
+    int indexYM = x + width * (y-1) + width * height * c;
+    int indexYP = x + width * (y+1) + width * height * c;
+
     if (x < width && y < height) {
-        out[index] = y < height + 1 ? in[x + width * (y+1) + width * height * c] - in[index] : 0.f;
+        float g_r = x+1 < width ? G[indexXP] : 0.f;
+        float u_r = x+1 < width ? in[indexXP] : 0.f;
+
+        float g_u = y+1 < height ? G[indexYP] : 0.f;
+        float u_u = y+1 < height ? in[indexYP] : 0.f;
+
+        float g_l = x > 0 ? G[indexXM] : 0.f;
+        float u_l = x > 0 ? in[indexXM] : 0.f;
+
+        float g_d = y > 0 ? G[indexYM] : 0.f;
+        float u_d = y > 0 ? in[indexYM] : 0.f;
+
+        float denom = 2.f + lambda * (g_r + g_u + g_l + g_d);
+
+        out[index] = (2.f * f[index] + lambda * (g_r * u_r + g_l * u_l + g_u * u_u + g_d * u_d)) / denom;
     }
 }
 
-__global__ void convolute(float* out, float* in , float* kernel, int radius, int width, int height, int channel) {
+__global__ void sor_method(float* out, float* in, float* f, float* G, float lambda, float theta, float eps, int rb, int width, int height) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     int c = threadIdx.z + blockDim.z * blockIdx.z;
-    int index = x + width * y + c * width * height;
-    float con_sum = 0.f;
-    int diam = 2 * radius + 1;
-    if (x < width && y < height) {
-        for (int i = -radius; i <= radius; i++) {
-            for (int j = -radius; j <= radius; j++) {
-                int xc = fmax(fmin((float)(width-1), (float)(x+j)), 0.f);
-                int yc = fmax(fmin((float)(height-1), (float)(y+i)), 0.f);
-                con_sum += in[xc + yc * width + c * width * height] * kernel[(j+radius) + (i+radius) * diam];
+
+
+        int index = x + width * y + width * height * c;
+        int indexXM = (x-1) + width * y + width * height * c;
+        int indexXP = (x+1) + width * y + width * height * c;
+        int indexYM = x + width * (y-1) + width * height * c;
+        int indexYP = x + width * (y+1) + width * height * c;
+
+        if (x < width && y < height) {
+            float g_r = x+1 < width ? G[indexXP] : 0.f;
+            float u_r = x+1 < width ? in[indexXP] : 0.f;
+
+            float g_u = y+1 < height ? G[indexYP] : 0.f;
+            float u_u = y+1 < height ? in[indexYP] : 0.f;
+
+            float g_l = x > 0 ? G[indexXM] : 0.f;
+            float u_l = x > 0 ? in[indexXM] : 0.f;
+
+            float g_d = y > 0 ? G[indexYM] : 0.f;
+            float u_d = y > 0 ? in[indexYM] : 0.f;
+
+            float denom = 2.f + lambda * (g_r + g_u + g_l + g_d);
+
+            if (rb == 1 && (x+y)%2 == 0) {
+                out[index] = (2.f * f[index] + lambda * (g_r * u_r + g_l * u_l + g_u * u_u + g_d * u_d)) / denom;
+                out[index] = out[index] + theta * (out[index] - in[index]);
             }
         }
-        out[index] = con_sum;
-    }
-}
 
-void gaussian_kernel(float* kernel, float sigma, int radius, int diameter) {
-    int i, j;
-    float sum = 0.f;
-    float denom = 2.0 * sigma * sigma;
-    float e = 0.f;
-    for (i = -radius; i <= radius; i++) {
-        for (j = -radius; j <= radius; j++) {
-            e = pow(j, 2) + pow(i, 2);
-            kernel[(j + radius) + (i + radius) * diameter] = exp(-e / denom) / (denom * PI);
-            sum += kernel[(j + radius) + (i + radius) * diameter];
-        }
     }
-    for (i = 0; i < diameter*diameter; i++) {
-        kernel[i] /= sum;
+    if (rb == 0 && (x+2)%2 == 1) {
+
+        int index = x + width * y + width * height * c;
+        int indexXM = (x-1) + width * y + width * height * c;
+        int indexXP = (x+1) + width * y + width * height * c;
+        int indexYM = x + width * (y-1) + width * height * c;
+        int indexYP = x + width * (y+1) + width * height * c;
+
+        if (x < width && y < height) {
+            float g_r = x+1 < width ? G[indexXP] : 0.f;
+            float u_r = x+1 < width ? in[indexXP] : 0.f;
+
+            float g_u = y+1 < height ? G[indexYP] : 0.f;
+            float u_u = y+1 < height ? in[indexYP] : 0.f;
+
+            float g_l = x > 0 ? G[indexXM] : 0.f;
+            float u_l = x > 0 ? in[indexXM] : 0.f;
+
+            float g_d = y > 0 ? G[indexYM] : 0.f;
+            float u_d = y > 0 ? in[indexYM] : 0.f;
+
+            float denom = 2.f + lambda * (g_r + g_u + g_l + g_d);
+
+            out[index] = (2.f * f[index] + lambda * (g_r * u_r + g_l * u_l + g_u * u_u + g_d * u_d)) / denom;
+            out[index] = out[index] + theta * (out[index] - in[index]);
+        }
+
     }
 }
 
@@ -134,11 +173,31 @@ int main(int argc, char **argv)
     cout << "gray: " << gray << endl;
 
     // load the input image as grayscale if "-gray" is specifed
-    float sigma = 1.f;
-    getParam("sigma", sigma, argc, argv);
-    cout << "sigma: " << sigma << endl;
-    int radius = ceil(3 * sigma);
-    int diameter = 2 * radius + 1;
+    bool sor = false;
+    getParam("sor", sor, argc, argv);
+    cout << "sor: " << sor << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float lambda = 8.0;
+    getParam("lambda", lambda, argc, argv);
+    cout << "lambda: " << lambda << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float eps = 0.01;
+    getParam("eps", eps, argc, argv);
+    cout << "eps: " << eps << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float theta = 0.5;
+    getParam("theta", theta, argc, argv);
+    cout << "theta: " << theta << endl;
+    
+    // load the input image as grayscale if "-gray" is specifed
+    // float sigma = sqrtf(2.f * tau * repeats);
+    // getParam("sigma", sigma, argc, argv);
+    // cout << "sigma: " << sigma << endl;
+    // int radius = ceil(3 * sigma);
+    // int diameter = 2 * radius + 1;
 
     // Init camera / Load input image
 #ifdef CAMERA
@@ -167,6 +226,7 @@ int main(int argc, char **argv)
     mIn.convertTo(mIn,CV_32F);
     // convert range of each channel to [0,1] (opencv default is [0,255])
     mIn /= 255.f;
+    addNoise(mIn, 0.1);
     // get image dimensions
     int w = mIn.cols;         // width
     int h = mIn.rows;         // height
@@ -182,9 +242,6 @@ int main(int argc, char **argv)
     // ###
     // ###
     cv::Mat mOut(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
-    cv::Mat M11(h,w,CV_8UC1);  // mOut will have the same number of channels as the input image, nc layers
-    cv::Mat M12(h,w,CV_8UC1);  // mOut will have the same number of channels as the input image, nc layers
-    cv::Mat M22(h,w,CV_8UC1);  // mOut will have the same number of channels as the input image, nc layers
     //cv::Mat mOut(h,w,CV_32FC3);    // mOut will be a color image, 3 layers
     //cv::Mat mOut(h,w,CV_32FC1);    // mOut will be a grayscale image, 1 layer
     // ### Define your own output images here as needed
@@ -198,24 +255,16 @@ int main(int argc, char **argv)
     // allocate raw input image array
     // allocate raw output array (the computation result will be stored in this array, then later converted to mOut for displaying)
     float *h_imgIn  = new float[(size_t)size];
-    float *h_kernel = new float[diameter*diameter];
     float *h_imgOut = new float[(size_t)w*h*mOut.channels()];
-    float *h_m11 = new float[(size_t)w*h];
-    float *h_m12 = new float[(size_t)w*h];
-    float *h_m22 = new float[(size_t)w*h];
 
     // allocate raw input image for GPU
     float* d_imgIn;
+    float* d_f;
     float* d_imgOut;
-    float* d_kernel;
     float* d_delX;
     float* d_delY;
-    float* d_m11;
-    float* d_m12;
-    float* d_m22;
-    float* d_m11conv;
-    float* d_m12conv;
-    float* d_m22conv;
+    float* d_G;
+    float* d_sor;
 
     // For camera mode: Make a loop to read in camera frames
 #ifdef CAMERA
@@ -241,103 +290,96 @@ int main(int argc, char **argv)
     // alloc GPU memory
     cudaMalloc(&d_imgIn, nbyte);
     CUDA_CHECK;
+    cudaMalloc(&d_f, nbyte);
+    CUDA_CHECK;
     cudaMalloc(&d_imgOut, nbyte);
     CUDA_CHECK;
     cudaMalloc(&d_delX, nbyte);
     CUDA_CHECK;
     cudaMalloc(&d_delY, nbyte);
     CUDA_CHECK;
-    cudaMalloc(&d_kernel, diameter*diameter*sizeof(float));
+    cudaMalloc(&d_G, nbyte);
     CUDA_CHECK;
-    cudaMalloc(&d_m11, w*h*sizeof(float));
-    CUDA_CHECK;
-    cudaMalloc(&d_m12, w*h*sizeof(float));
-    CUDA_CHECK;
-    cudaMalloc(&d_m22, w*h*sizeof(float));
-    CUDA_CHECK;
-    cudaMalloc(&d_m11conv, w*h*sizeof(float));
-    CUDA_CHECK;
-    cudaMalloc(&d_m12conv, w*h*sizeof(float));
-    CUDA_CHECK;
-    cudaMalloc(&d_m22conv, w*h*sizeof(float));
+    cudaMalloc(&d_sor, nbyte);
     CUDA_CHECK;
 
-    gaussian_kernel(h_kernel, sigma, radius, diameter);
-    // copy host memory
     cudaMemcpy(d_imgIn, h_imgIn, nbyte, cudaMemcpyHostToDevice);
     CUDA_CHECK;
-    cudaMemcpy(d_kernel, h_kernel, diameter*diameter*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_f, h_imgIn, nbyte, cudaMemcpyHostToDevice);
     CUDA_CHECK;
 
     // launch kernel
     dim3 block = dim3(32, 8, nc);
     dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, (nc + block.z - 1) / block.z);
-    dim3 block_matrix = dim3(32, 8, 1);
-    dim3 grid_matrix = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, 1);
+    // dim3 block_sum_up = dim3(256, 1, 1);
+    // dim3 grid_sum_up = dim3((size + block_sum_up.x - 1) / block_sum_up.x, 1, 1);
+    // dim3 block_matrix = dim3(32, 8, 1);
+    // dim3 grid_matrix = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, 1);
 
     Timer timer; timer.start();
-    for (int i = 0; i < repeats; i++) {
-        convolute <<<grid, block>>> (d_imgOut, d_imgIn, d_kernel, radius, w, h, nc);
-        del_x_plus <<<grid, block>>> (d_delX, d_imgOut, w, h);
-        del_y_plus <<<grid, block>>> (d_delY, d_imgOut, w, h);
-        compute_matrix <<<grid_matrix, block_matrix>>> (d_m11, d_m12, d_m22, d_delX, d_delY, w, h, nc);
-        convolute <<<grid_matrix, block_matrix>>> (d_m11conv, d_m11, d_kernel, radius, w, h, 1);
-        convolute <<<grid_matrix, block_matrix>>> (d_m12conv, d_m12, d_kernel, radius, w, h, 1);
-        convolute <<<grid_matrix, block_matrix>>> (d_m22conv, d_m22, d_kernel, radius, w, h, 1);
+    for (int i = 1; i <= repeats; i++) {
+        // del_x_plus <<<grid, block>>> (d_delX, d_imgIn, w, h);
+        // del_y_plus <<<grid, block>>> (d_delY, d_imgIn, w, h);
+        if (sor) {
+            fillG <<<grid, block>>> (d_G, d_imgIn, eps, w, h);
+            if (i == repeats) {
+                sor_method <<<grid, block>>> (d_imgOut, d_imgIn, d_f, d_G, lambda, theta, eps, 1, w, h);
+                fillG <<<grid, block>>> (d_G, d_imgOut, eps, w, h);
+                sor_method <<<grid, block>>> (d_imgOut, d_imgOut, d_f, d_G, lambda, theta, eps, 0, w, h);
+                // updateArray <<<grid_sum_up, block_sum_up>>> (d_imgOut, d_imgOut, d_sor, size);
+            } else {
+                sor_method <<<grid, block>>> (d_sor, d_imgIn, d_f, d_G, lambda, theta, eps, 1, w, h);
+                fillG <<<grid, block>>> (d_G, d_sor, eps, w, h);
+                sor_method <<<grid, block>>> (d_imgIn, d_sor, d_f, d_G, lambda, theta, eps, 0, w, h);
+                // updateArray <<<grid_sum_up, block_sum_up>>> (d_imgIn, d_imgIn, d_sor, size);
+            }
+        } else {
+            fillG <<<grid, block>>> (d_G, d_imgIn, eps, w, h);
+            if (i == repeats) {
+                jacobi <<<grid, block>>> (d_imgOut, d_imgIn, d_f, d_G, lambda, eps, w, h);
+            } else {
+                jacobi <<<grid, block>>> (d_imgIn, d_imgIn, d_f, d_G, lambda, eps, w, h);
+            }
+        }
+        // apply_g <<<grid, block>>> (d_delX, d_delY, w, h, kind, eps);
+        // del_x_minus <<<grid, block>>> (d_divX, d_delX, w, h);
+        // del_y_minus <<<grid, block>>> (d_divY, d_delY, w, h);
+        // addArray <<<grid_sum_up, block_sum_up>>> (d_divergence, d_divX, d_divY, size);
+        // if (i == repeats) {
+        //     make_update <<<grid_matrix, block_matrix>>> (d_imgOut, d_imgIn, d_divergence, tau, eps, kind, w, h, nc);
+        // } else {
+        //     make_update <<<grid_matrix, block_matrix>>> (d_imgIn, d_imgIn, d_divergence, tau, eps, kind, w, h, nc);
+        // }
     }
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
     cout << "time: " << t*1000 << " ms" << endl;
 
-    // cudaMemcpy(h_imgOut, d_imgOut, nbyte, cudaMemcpyDeviceToHost);
-    // CUDA_CHECK;
-    // cudaMemcpy(h_imgOut, d_delY, nbyte, cudaMemcpyDeviceToHost);
-    // CUDA_CHECK;
-    cudaMemcpy(h_m11, d_m11conv, w*h*sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_imgOut, d_imgOut, nbyte, cudaMemcpyDeviceToHost);
     CUDA_CHECK;
-    cudaMemcpy(h_m12, d_m12conv, w*h*sizeof(float), cudaMemcpyDeviceToHost);
-    CUDA_CHECK;
-    cudaMemcpy(h_m22, d_m22conv, w*h*sizeof(float), cudaMemcpyDeviceToHost);
-    CUDA_CHECK;
-
-    for (int i = 0; i < h; i++) {
-        for (int j = 0; j < w; j++) {
-            M11.at<uchar>(i, j) = h_m11[j + i * w] * 255; // > 0 ? h_m11[j + i * w] * 255 : 0;
-            M12.at<uchar>(i, j) = h_m12[j + i * w] * 255; // > 0 ? h_m12[j + i * w] * 255 : 0;
-            M22.at<uchar>(i, j) = h_m22[j + i * w] * 255; // > 0 ? h_m22[j + i * w] * 255 : 0;
-        }
-    }
 
     // free GPU memory
     cudaFree(d_imgIn);
     CUDA_CHECK;
+    cudaFree(d_f);
+    CUDA_CHECK;
     cudaFree(d_imgOut);
     CUDA_CHECK;
-    cudaFree(d_kernel);
+    cudaFree(d_delX);
     CUDA_CHECK;
-    cudaFree(d_m11);
+    cudaFree(d_delY);
     CUDA_CHECK;
-    cudaFree(d_m12);
+    cudaFree(d_G);
     CUDA_CHECK;
-    cudaFree(d_m22);
-    CUDA_CHECK;
-    cudaFree(d_m11conv);
-    CUDA_CHECK;
-    cudaFree(d_m12conv);
-    CUDA_CHECK;
-    cudaFree(d_m22conv);
+    cudaFree(d_sor);
     CUDA_CHECK;
 
     // show input image
     showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
 
     // show output image: first convert to interleaved opencv format from the layered raw array
-    // convert_layered_to_mat(M11, h_m11);
-    showImage("M11", M11, 100+w+40, 100);
-    showImage("M12", M12, 100, 100+h+40);
-    showImage("M22", M22, 100+w+40, 100+h+40);
-    // convert_layered_to_mat(mOut, h_imgOut);
-    // showImage("Output", mOut, 100+w+40, 100);
+    convert_layered_to_mat(mOut, h_imgOut);
+    showImage("Diffusion", mOut, 100+w+40, 100);
 
     // ### Display your own output images here as needed
 
@@ -351,17 +393,11 @@ int main(int argc, char **argv)
 
     // save input and result
     cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
-    cv::imwrite("image_M11.png",M11);
-    cv::imwrite("image_M12.png",M12);
-    cv::imwrite("image_M22.png",M22);
+    cv::imwrite("image_result.png",mOut*255.f);  // "imwrite" assumes channel range [0,255]
 
     // free allocated arrays
     delete[] h_imgIn;
     delete[] h_imgOut;
-    delete[] h_kernel;
-    delete[] h_m11;
-    delete[] h_m12;
-    delete[] h_m22;
 
     // close all opencv windows
     cvDestroyAllWindows();

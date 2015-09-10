@@ -90,17 +90,13 @@ __global__ void compute_matrix(float* m11, float* m12, float* m22, float* in_x, 
 //     }
 // }
 
-__global__ void make_update(float* u_nPlusOne, float* u_n, float* div, float* delX, float* delY, float tau, float eps, int kind, int width, int height, int channel) {
+__global__ void make_update(float* u_nPlusOne, float* u_n, float* div, float tau, float eps, int kind, int width, int height, int channel) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     int index = x + width * y;
-    int v1 = 0.f;
-    int v2 = 0.f;
     if (x < width && y < height) {
         for (int i = 0; i < channel; i++) {
-            v1 = delX[index + i * height * width];
-            v2 = delY[index + i * height * width];
-            u_nPlusOne[index + i * height * width] = u_n[index + i * height * width] + tau / compute_g(v1, v2, eps, kind) * div[index + i * height * width];
+            u_nPlusOne[index + i * height * width] = u_n[index + i * height * width] + tau * div[index + i * height * width];
         }
     }
 }
@@ -226,6 +222,19 @@ void gaussian_kernel(float* kernel, float sigma, int radius, int diameter) {
     }
 }
 
+float compute_parameter(float v1, float v2, float eps, int kind) {
+    float s = sqrtf(v1*v1 + v2*v2);
+    if (kind == 1) {
+        return 1.f;
+    } else if (kind == 2) {
+        return 1.f / fmax(eps, s);
+    } else if (kind == 3) {
+        return exp(-(s*s)/eps) / eps;
+    } else {
+        return 1.f;
+    }
+}
+
 int main(int argc, char **argv)
 {
     // Before the GPU can process your kernels, a so called "CUDA context" must be initialized
@@ -269,11 +278,6 @@ int main(int argc, char **argv)
     cout << "beta: " << beta << endl;
 
     // load the input image as grayscale if "-gray" is specifed
-    float tau = 0.25;
-    getParam("tau", tau, argc, argv);
-    cout << "tau: " << tau << endl;
-
-    // load the input image as grayscale if "-gray" is specifed
     float eps = 1.f;
     getParam("eps", eps, argc, argv);
     cout << "eps: " << eps << endl;
@@ -282,6 +286,11 @@ int main(int argc, char **argv)
     int kind = 1;
     getParam("kind", kind, argc, argv);
     cout << "kind: " << kind << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float tau = 0.25 / compute_parameter(0.f, 0.f, eps, kind);
+    getParam("tau", tau, argc, argv);
+    cout << "tau: " << tau << endl;
     
     // load the input image as grayscale if "-gray" is specifed
     float sigma = sqrtf(2.f * tau * repeats);
@@ -454,9 +463,9 @@ int main(int argc, char **argv)
         del_y_minus <<<grid, block>>> (d_divY, d_delY, w, h);
         addArray <<<grid_sum_up, block_sum_up>>> (d_divergence, d_divX, d_divY, size);
         if (i == repeats) {
-            make_update <<<grid_matrix, block_matrix>>> (d_imgOut, d_imgIn, d_divergence, d_delX, d_delY, tau, eps, kind, w, h, nc);
+            make_update <<<grid_matrix, block_matrix>>> (d_imgOut, d_imgIn, d_divergence, tau, eps, kind, w, h, nc);
         } else {
-            make_update <<<grid_matrix, block_matrix>>> (d_imgIn, d_imgIn, d_divergence, d_delX, d_delY, tau, eps, kind, w, h, nc);
+            make_update <<<grid_matrix, block_matrix>>> (d_imgIn, d_imgIn, d_divergence, tau, eps, kind, w, h, nc);
         }
     }
 

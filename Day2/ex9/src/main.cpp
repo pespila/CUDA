@@ -26,7 +26,6 @@ void initBoardAtRandom(cv::Mat& board) {
 int main(int argc, const char *argv[])
 {
     unsigned char* d_src;
-    unsigned char* d_dst;
 
     cv::Mat board = cv::Mat::zeros(BOARD_SIZE_X, BOARD_SIZE_Y, CV_8UC1);
     BoardVisualization viewer(BOARD_SIZE_X, BOARD_SIZE_Y, CIRCLE_RADIUS);
@@ -39,13 +38,8 @@ int main(int argc, const char *argv[])
     // pointer to the board array
     unsigned char* h_src = board.data;
 
-    unsigned char* d_src;
-    unsigned char* d_dst;
-
     // alloc GPU memory
     cudaMalloc(&d_src, nbyte);
-    CUDA_CHECK;
-    cudaMalloc(&d_dst, nbyte);
     CUDA_CHECK;
 
     cudaMemcpy(d_src, h_src, nbyte, cudaMemcpyHostToDevice);
@@ -54,25 +48,24 @@ int main(int argc, const char *argv[])
     int key;
     while (key = cv::waitKey(10)) {
 
-        runGameOfLifeIteration(d_src, d_dst, BOARD_SIZE_X, BOARD_SIZE_Y);
+        runGameOfLifeIteration(d_src, d_src, BOARD_SIZE_X, BOARD_SIZE_Y);
 
-        /**
-         *  YOUR CODE HERE
-         *
-         *  Here you must perform one iteration of the Game of Life and do
-         *  the proper memory operations to display the board.
-         */
-
-        cudaMemcpy(h_src, d_dst, nbyte, cudaMemcpyDeviceToHost);
+        cudaMemcpy(h_src, d_src, nbyte, cudaMemcpyDeviceToHost);
         CUDA_CHECK;
+
+        for (int i = 0; i < BOARD_SIZE_Y; i++)
+        {
+            for (int j = 0; j < BOARD_SIZE_X; j++)
+            {
+                board.at<uchar>(i, j) = h_src[j + i * BOARD_SIZE_X];
+            }
+        }
 
         /** This is just for display. You should not touch this.  **/
         viewer.displayBoard(board);
         if (key != -1) break;
     }
 
-    cudaFree(d_dst);
-    CUDA_CHECK;
     cudaFree(d_src);
     CUDA_CHECK;
     free(h_src);
