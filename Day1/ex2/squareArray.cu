@@ -17,14 +17,14 @@ void cuda_check(string file, int line) {
     }
 }
 
-inline __device__ float add(float x) {
+inline __device__ float square(float x) {
     return pow(x, 2);
 }
 
 __global__ void squareArray(float* in_out, int size) {
     int index = threadIdx.x + blockDim.x * blockIdx.x;
     if (index < size) {
-        in_out[index] = add(in_out[index]);
+        in_out[index] = square(in_out[index]);
     }
 }
 

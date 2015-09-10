@@ -18,55 +18,30 @@
 
 #include "aux.h"
 #include <iostream>
-#include <stdio.h>
 using namespace std;
-
-#define PI 3.14159265359
 
 // uncomment to use the camera
 // #define CAMERA
 
-__global__ void convolute(float* out, float* in , float* kernel, int radius, int width, int height, int channel) {
-    int bw = blockDim.x;
-    int bh = blockDim.y;
-    int sw = bw + 2 * radius;
-    int sh = bh + 2 * radius;
-    int xi, yi, sh_idx;
-
-    extern __shared__ float sh_data[];
-
-    for (int i = 0; i < sh; i++) {
-        for (int j = 0; j < sw; j++) {
-            sh_idx = j + i * sw;
-            xi = (sh_idx % sw) + blockIdx.x * blockDim.x - radius;
-            yi = (sh_idx / sw) + blockIdx.y * blockDim.y - radius;
-            sh_data[sh_idx] = in[xi + yi * width + channel * width * height];
-        }
-    }
-    __syncthreads();
-
-    for (int i = -radius; i <= radius; i++) {
-        for (int j = -radius; j <= radius; j++) {
-            
-        }
-    }
-
+inline __device__ float apply_gamma(float x, float gamma) {
+    return pow(x, gamma);
 }
 
-void gaussian_kernel(float* kernel, float sigma, int radius, int diameter) {
-    int i, j;
-    float sum = 0.f;
-    float denom = 2.0 * sigma * sigma;
-    float e = 0.f;
-    for (i = -radius; i <= radius; i++) {
-        for (j = -radius; j <= radius; j++) {
-            e = pow(j, 2) + pow(i, 2);
-            kernel[(j + radius) + (i + radius) * diameter] = exp(-e / denom) / (denom * PI);
-            sum += kernel[(j + radius) + (i + radius) * diameter];
+__global__ void gamma_correction(float* out, float* in, float gamma, int width, int height, int pitch, int channel) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    if (x < width && y < height) {
+        for (int c = 0; c < channel; c++) {
+            float* row_a = (float*)((char*)in + (y + c * height) * pitch);
+            float* out_a = (float*)((char*)out + (y + c * height) * pitch);
+            out_a[x] = apply_gamma(row_a[x], gamma);
         }
     }
-    for (i = 0; i < diameter*diameter; i++) {
-        kernel[i] /= sum;
+}
+
+void gamma_correction_cpu(float* out, float* in, float gamma, int size) {
+    for (int i = 0; i < size; i++) {
+        out[i] = pow(in[i], gamma);
     }
 }
 
@@ -102,12 +77,15 @@ int main(int argc, char **argv)
     getParam("gray", gray, argc, argv);
     cout << "gray: " << gray << endl;
 
-    // load the input image as grayscale if "-gray" is specifed
-    float sigma = 1.f;
-    getParam("sigma", sigma, argc, argv);
-    cout << "sigma: " << sigma << endl;
-    int radius = ceil(3 * sigma);
-    int diameter = 2 * radius + 1;
+    // ### Define your own parameters here as needed
+    float gamma = 1.0;
+    getParam("gamma", gamma, argc, argv);
+    cout << "gamma: " << gamma << endl;
+
+    // ### Define your own parameters here as needed
+    bool gpu = false;
+    getParam("gpu", gpu, argc, argv);
+    cout << "gpu: " << gpu << endl;
 
     // Init camera / Load input image
 #ifdef CAMERA
@@ -141,7 +119,7 @@ int main(int argc, char **argv)
     int h = mIn.rows;         // height
     int nc = mIn.channels();  // number of channels
     int size = w * h * nc;
-    int nbyte = size * sizeof(float);
+    // int nbyte = size * sizeof(float);
     cout << "image: " << w << " x " << h << endl;
 
     // Set the output image format
@@ -151,7 +129,6 @@ int main(int argc, char **argv)
     // ###
     // ###
     cv::Mat mOut(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
-    cv::Mat gaussOut(diameter,diameter,CV_8UC1);  // mOut will have the same number of channels as the input image, nc layers
     //cv::Mat mOut(h,w,CV_32FC3);    // mOut will be a color image, 3 layers
     //cv::Mat mOut(h,w,CV_32FC1);    // mOut will be a grayscale image, 1 layer
     // ### Define your own output images here as needed
@@ -163,15 +140,13 @@ int main(int argc, char **argv)
     // output image number of channels: mOut.channels(), as defined above (nc, 3, or 1)
 
     // allocate raw input image array
+    float *h_imgIn  = new float[size];
     // allocate raw output array (the computation result will be stored in this array, then later converted to mOut for displaying)
-    float *h_imgIn  = new float[(size_t)size];
-    float *h_kernel = new float[diameter*diameter];
-    float *h_imgOut = new float[(size_t)w*h*mOut.channels()];
+    float *h_imgOut = new float[size];
 
     // allocate raw input image for GPU
     float* d_imgIn;
     float* d_imgOut;
-    float* d_kernel;
 
     // For camera mode: Make a loop to read in camera frames
 #ifdef CAMERA
@@ -194,50 +169,45 @@ int main(int argc, char **argv)
     // So we will convert as necessary, using interleaved "cv::Mat" for loading/saving/displaying, and layered "float*" for CUDA computations
     convert_mat_to_layered (h_imgIn, mIn);
 
-    // alloc GPU memory
-    cudaMalloc(&d_imgIn, nbyte);
-    CUDA_CHECK;
-    cudaMalloc(&d_imgOut, nbyte);
-    CUDA_CHECK;
-    cudaMalloc(&d_kernel, diameter*diameter*sizeof(float));
-    CUDA_CHECK;
+    unsigned long int pitch;
+    unsigned long int memsize = w * sizeof(float);
+    cudaMallocPitch(&d_imgIn, &pitch, memsize, h*nc);
+    cudaMallocPitch(&d_imgOut, &pitch, memsize, h*nc);
 
-    gaussian_kernel(h_kernel, sigma, radius, diameter);
     // copy host memory
-    cudaMemcpy(d_imgIn, h_imgIn, nbyte, cudaMemcpyHostToDevice);
+    cudaMemcpy2D(d_imgIn, pitch, h_imgIn, memsize, memsize, h*nc, cudaMemcpyHostToDevice);
     CUDA_CHECK;
-    cudaMemcpy(d_kernel, h_kernel, diameter*diameter*sizeof(float), cudaMemcpyHostToDevice);
-    CUDA_CHECK;
+    // cudaMemcpy(d_imgIn, h_imgIn, nbyte, cudaMemcpyHostToDevice);
+    // CUDA_CHECK;
 
     // launch kernel
     dim3 block = dim3(32, 8, 1);
     dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, 1);
 
-    int bw = block.x;
-    int bh = block.y;
-    int sw = bw + 2 * radius;
-    int sh = bh + 2 * radius;
-    int coeff = sw * sh * sizeof(float);
-
     Timer timer; timer.start();
+
     for (int i = 0; i < repeats; i++) {
-        for (int k = 0; k < nc; k++) {
-            convolute <<<grid, block, coeff>>> (d_imgOut, d_imgIn, d_kernel, radius, w, h, k);
+        if (gpu) {
+            gamma_correction <<<grid, block>>> (d_imgOut, d_imgIn, gamma, w, h, pitch, nc);
+            cudaDeviceSynchronize();
+        } else {
+            gamma_correction_cpu(h_imgOut, h_imgIn, gamma, size);
         }
     }
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
     cout << "time: " << t*1000 << " ms" << endl;
 
-    cudaMemcpy(h_imgOut, d_imgOut, nbyte, cudaMemcpyDeviceToHost);
+    cudaMemcpy2D(h_imgOut, memsize, d_imgOut, pitch, memsize, h*nc, cudaMemcpyDeviceToHost);
     CUDA_CHECK;
+
+    // cudaMemcpy(h_imgOut, d_imgIn, nbyte, cudaMemcpyDeviceToHost);
+    // CUDA_CHECK;
 
     // free GPU memory
     cudaFree(d_imgIn);
     CUDA_CHECK;
     cudaFree(d_imgOut);
-    CUDA_CHECK;
-    cudaFree(d_kernel);
     CUDA_CHECK;
 
 
@@ -246,9 +216,7 @@ int main(int argc, char **argv)
 
     // show output image: first convert to interleaved opencv format from the layered raw array
     convert_layered_to_mat(mOut, h_imgOut);
-    // convert_layered_to_mat(gaussOut, h_kernel);
     showImage("Output", mOut, 100+w+40, 100);
-    // showImage("Output", gaussOut, 100, 100);
 
     // ### Display your own output images here as needed
 
@@ -267,7 +235,6 @@ int main(int argc, char **argv)
     // free allocated arrays
     delete[] h_imgIn;
     delete[] h_imgOut;
-    delete[] h_kernel;
 
     // close all opencv windows
     cvDestroyAllWindows();

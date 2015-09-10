@@ -179,7 +179,7 @@ int main(int argc, char **argv)
 
     // launch kernel
     dim3 block = dim3(32, 8, nc);
-    dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, 1);
+    dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, (nc + block.z - 1) / block.z);
 
     Timer timer; timer.start();
 

@@ -24,7 +24,18 @@ using namespace std;
 #define PI 3.14159265359
 
 // uncomment to use the camera
-#define CAMERA
+// #define CAMERA
+
+inline __device__ float add(float x1, float x2) {
+    return x1 + x2;
+}
+
+__global__ void addArray(float* out, float* in1, float* in2, int size) {
+    int index = threadIdx.x + blockDim.x * blockIdx.x;
+    if (index < size) {
+        out[index] = add(in1[index], in2[index]);
+    }
+}
 
 __global__ void compute_matrix(float* m11, float* m12, float* m22, float* in_x, float* in_y, int width, int height, int channel) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
@@ -42,6 +53,55 @@ __global__ void compute_matrix(float* m11, float* m12, float* m22, float* in_x, 
         m11[index] = sum_m11;
         m12[index] = sum_m12;
         m22[index] = sum_m22;
+    }
+}
+
+__global__ void compute_G(float* m11, float* m12, float* m22, float* e1X, float* e1Y, float* e2X, float* e2Y, float* l1, float* l2, float alpha, float C, int width, int height, int channel) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int index = x + width * y;
+    float mu1 = alpha;
+    float mu2 = 0.f;
+    float lambda1 = 0.f;
+    float lambda2 = 0.f;
+    float value = 0.f;
+    if (x < width && y < height) {
+        for (int i = 0; i < channel; i++) {
+            lambda1 = l1[index + i * width * height];
+            lambda2 = l2[index + i * width * height];
+            value = alpha + (1.f - alpha) * exp(-C/pow((lambda1 - lambda2), 2));
+            mu2 = lambda1 == lambda2 ? alpha : value;
+            m11[index + i * width * height] = mu1 * pow(e1X[index + i * width * height], 2) + mu2 * pow(e2X[index + i * width * height], 2);
+            m22[index + i * width * height] = mu1 * pow(e1Y[index + i * width * height], 2) + mu2 * pow(e2Y[index + i * width * height], 2);
+            m12[index + i * width * height] = mu1 * e1X[index + i * width * height] * e1Y[index + i * width * height] + mu2 * e2X[index + i * width * height] * e2Y[index + i * width * height];
+        }
+    }
+}
+
+__global__ void apply_G(float* outX, float* outY, float* inX, float* inY, float* m11, float* m12, float* m22, int width, int height, int channel) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int index = x + width * y;
+    float x1 = 0.f;
+    float x2 = 0.f;
+    if (x < width && y < height) {
+        for (int i = 0; i < channel; i++) {
+            x1 = m11[index] * inX[index + i * height * width] + m12[index] * inY[index + i * width * height];
+            x2 = m22[index] * inX[index + i * height * width] + m12[index] * inY[index + i * width * height];
+            outX[index + i * width * height] = x1;
+            outY[index + i * width * height] = x2;
+        }
+    }
+}
+
+__global__ void make_update(float* u_nPlusOne, float* u_n, float* div, float tau, int width, int height, int channel) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int index = x + width * y;
+    if (x < width && y < height) {
+        for (int i = 0; i < channel; i++) {
+            u_nPlusOne[index + i * height * width] = u_n[index + i * height * width] + tau * div[index + i * height * width];
+        }
     }
 }
 
@@ -90,6 +150,19 @@ __global__ void eigenvalue(float* lambda1, float* lambda2, float* m11, float* m1
     }
 }
 
+__global__ void eigenvector(float* ev1X, float* ev1Y, float* ev2X, float* ev2Y, float* delX, float* delY, int width, int height) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int c = threadIdx.z + blockDim.z * blockIdx.z;
+    int index = x + width * y + c * height * width;
+    if (x < width && y < height) {
+        ev1X[index] = delX[index];
+        ev1Y[index] = delY[index];
+        ev2X[index] = -delY[index];
+        ev2Y[index] = delX[index];
+    }
+}
+
 __global__ void del_x_plus(float* out, float* in, int width, int height) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -107,6 +180,26 @@ __global__ void del_y_plus(float* out, float* in, int width, int height) {
     int index = x + width * y + width * height * c;
     if (x < width && y < height) {
         out[index] = y < height + 1 ? in[x + width * (y+1) + width * height * c] - in[index] : 0.f;
+    }
+}
+
+__global__ void del_x_minus(float* out, float* in, int width, int height) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int c = threadIdx.z + blockDim.z * blockIdx.z;
+    int index = x + width * y + width * height * c;
+    if (x < width && y < height) {
+        out[index] = x > 0 ? in[index] - in[x-1 + y * width + width * height * c] : in[index];
+    }
+}
+
+__global__ void del_y_minus(float* out, float* in, int width, int height) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int c = threadIdx.z + blockDim.z * blockIdx.z;
+    int index = x + width * y + width * height * c;
+    if (x < width && y < height) {
+        out[index] = y > 0 ? in[index] - in[x + (y-1) * width + width * height * c] : in[index];
     }
 }
 
@@ -179,21 +272,43 @@ int main(int argc, char **argv)
     cout << "gray: " << gray << endl;
 
     // load the input image as grayscale if "-gray" is specifed
-    float sigma = 1.f;
+    float alpha = pow(10, -2);
+    getParam("alpha", alpha, argc, argv);
+    cout << "alpha: " << alpha << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float C = pow(10, -3);
+    getParam("C", C, argc, argv);
+    cout << "C: " << C << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float tau = 0.25;
+    getParam("tau", tau, argc, argv);
+    cout << "tau: " << tau << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float eps = 1.f;
+    getParam("eps", eps, argc, argv);
+    cout << "eps: " << eps << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    int kind = 1;
+    getParam("kind", kind, argc, argv);
+    cout << "kind: " << kind << endl;
+    
+    // load the input image as grayscale if "-gray" is specifed
+    float sigma = sqrtf(2.f * tau * repeats);
     getParam("sigma", sigma, argc, argv);
     cout << "sigma: " << sigma << endl;
     int radius = ceil(3 * sigma);
     int diameter = 2 * radius + 1;
 
     // load the input image as grayscale if "-gray" is specifed
-    float alpha = pow(10, -2);
-    getParam("alpha", alpha, argc, argv);
-    cout << "alpha: " << alpha << endl;
-
-    // load the input image as grayscale if "-gray" is specifed
-    float beta = pow(10, -3);
-    getParam("beta", beta, argc, argv);
-    cout << "beta: " << beta << endl;
+    float rho = sqrtf(2.f * tau * repeats);
+    getParam("rho", rho, argc, argv);
+    cout << "rho: " << rho << endl;
+    int radius_rho = ceil(3 * rho);
+    int diameter_rho = 2 * radius_rho + 1;
 
     // Init camera / Load input image
 #ifdef CAMERA
@@ -237,9 +352,7 @@ int main(int argc, char **argv)
     // ###
     // ###
     cv::Mat mOut(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
-    cv::Mat M11(h,w,CV_8UC1);  // mOut will have the same number of channels as the input image, nc layers
-    cv::Mat M12(h,w,CV_8UC1);  // mOut will have the same number of channels as the input image, nc layers
-    cv::Mat M22(h,w,CV_8UC1);  // mOut will have the same number of channels as the input image, nc layers
+    cv::Mat Conv(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
     //cv::Mat mOut(h,w,CV_32FC3);    // mOut will be a color image, 3 layers
     //cv::Mat mOut(h,w,CV_32FC1);    // mOut will be a grayscale image, 1 layer
     // ### Define your own output images here as needed
@@ -254,7 +367,9 @@ int main(int argc, char **argv)
     // allocate raw output array (the computation result will be stored in this array, then later converted to mOut for displaying)
     float *h_imgIn  = new float[(size_t)size];
     float *h_kernel = new float[diameter*diameter];
+    float *h_kernel_rho = new float[diameter_rho*diameter_rho];
     float *h_imgOut = new float[(size_t)w*h*mOut.channels()];
+    float *h_conv = new float[(size_t)w*h*mOut.channels()];
     float *h_m11 = new float[(size_t)w*h];
     float *h_m12 = new float[(size_t)w*h];
     float *h_m22 = new float[(size_t)w*h];
@@ -263,8 +378,17 @@ int main(int argc, char **argv)
     float* d_imgIn;
     float* d_imgOut;
     float* d_kernel;
+    float* d_kernel_rho;
+    float* d_conv;
     float* d_delX;
     float* d_delY;
+    float* d_ev1X;
+    float* d_ev1Y;
+    float* d_ev2X;
+    float* d_ev2Y;
+    float* d_divX;
+    float* d_divY;
+    float* d_divergence;
     float* d_m11;
     float* d_m12;
     float* d_m22;
@@ -279,16 +403,50 @@ int main(int argc, char **argv)
     // Read a camera image frame every 30 milliseconds:
     // cv::waitKey(30) waits 30 milliseconds for a keyboard input,
     // returns a value <0 if no key is pressed during this time, returns immediately with a value >=0 if a key is pressed
+    while (cv::waitKey(30) < 0)
+    {
+    // Get camera image
+    camera >> mIn;
+    // convert to float representation (opencv loads image values as single bytes by default)
+    mIn.convertTo(mIn,CV_32F);
+    // convert range of each channel to [0,1] (opencv default is [0,255])
+    mIn /= 255.f;
+#endif
+
+    // Init raw input image array
+    // opencv images are interleaved: rgb rgb rgb...  (actually bgr bgr bgr...)
+    // But for CUDA it's better to work with layered images: rrr... ggg... bbb...
+    // So we will convert as necessary, using interleaved "cv::Mat" for loading/saving/displaying, and layered "float*" for CUDA computations
+    convert_mat_to_layered (h_imgIn, mIn);
+
     // alloc GPU memory
     cudaMalloc(&d_imgIn, nbyte);
     CUDA_CHECK;
     cudaMalloc(&d_imgOut, nbyte);
     CUDA_CHECK;
+    cudaMalloc(&d_conv, nbyte);
+    CUDA_CHECK;
     cudaMalloc(&d_delX, nbyte);
     CUDA_CHECK;
     cudaMalloc(&d_delY, nbyte);
     CUDA_CHECK;
+    cudaMalloc(&d_ev1X, nbyte);
+    CUDA_CHECK;
+    cudaMalloc(&d_ev1Y, nbyte);
+    CUDA_CHECK;
+    cudaMalloc(&d_ev2X, nbyte);
+    CUDA_CHECK;
+    cudaMalloc(&d_ev2Y, nbyte);
+    CUDA_CHECK;
+    cudaMalloc(&d_divX, nbyte);
+    CUDA_CHECK;
+    cudaMalloc(&d_divY, nbyte);
+    CUDA_CHECK;
+    cudaMalloc(&d_divergence, nbyte);
+    CUDA_CHECK;
     cudaMalloc(&d_kernel, diameter*diameter*sizeof(float));
+    CUDA_CHECK;
+    cudaMalloc(&d_kernel_rho, diameter_rho*diameter_rho*sizeof(float));
     CUDA_CHECK;
     cudaMalloc(&d_m11, w*h*sizeof(float));
     CUDA_CHECK;
@@ -306,47 +464,46 @@ int main(int argc, char **argv)
     CUDA_CHECK;
     cudaMalloc(&d_lambda2, w*h*sizeof(float));
     CUDA_CHECK;
-    while (cv::waitKey(30) < 0)
-    {
-    // Get camera image
-    camera >> mIn;
-    // convert to float representation (opencv loads image values as single bytes by default)
-    mIn.convertTo(mIn,CV_32F);
-    // convert range of each channel to [0,1] (opencv default is [0,255])
-    mIn /= 255.f;
-#endif
-
-    // Init raw input image array
-    // opencv images are interleaved: rgb rgb rgb...  (actually bgr bgr bgr...)
-    // But for CUDA it's better to work with layered images: rrr... ggg... bbb...
-    // So we will convert as necessary, using interleaved "cv::Mat" for loading/saving/displaying, and layered "float*" for CUDA computations
-    convert_mat_to_layered (h_imgIn, mIn);
-
 
     gaussian_kernel(h_kernel, sigma, radius, diameter);
+    gaussian_kernel(h_kernel_rho, rho, radius_rho, diameter_rho);
     // copy host memory
     cudaMemcpy(d_imgIn, h_imgIn, nbyte, cudaMemcpyHostToDevice);
     CUDA_CHECK;
     cudaMemcpy(d_kernel, h_kernel, diameter*diameter*sizeof(float), cudaMemcpyHostToDevice);
     CUDA_CHECK;
+    cudaMemcpy(d_kernel_rho, h_kernel_rho, diameter_rho*diameter_rho*sizeof(float), cudaMemcpyHostToDevice);
+    CUDA_CHECK;
 
     // launch kernel
     dim3 block = dim3(32, 8, nc);
     dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, (nc + block.z - 1) / block.z);
+    dim3 block_sum_up = dim3(256, 1, 1);
+    dim3 grid_sum_up = dim3((size + block_sum_up.x - 1) / block_sum_up.x, 1, 1);
     dim3 block_matrix = dim3(32, 8, 1);
     dim3 grid_matrix = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, 1);
 
     Timer timer; timer.start();
-    for (int i = 0; i < repeats; i++) {
-        convolute <<<grid, block>>> (d_imgOut, d_imgIn, d_kernel, radius, w, h, nc);
-        del_x_plus <<<grid, block>>> (d_delX, d_imgOut, w, h);
-        del_y_plus <<<grid, block>>> (d_delY, d_imgOut, w, h);
+    for (int i = 1; i <= repeats; i++) {
+        convolute <<<grid, block>>> (d_conv, d_imgIn, d_kernel, radius, w, h, nc);
+        del_x_plus <<<grid, block>>> (d_delX, d_conv, w, h);
+        del_y_plus <<<grid, block>>> (d_delY, d_conv, w, h);
         compute_matrix <<<grid_matrix, block_matrix>>> (d_m11, d_m12, d_m22, d_delX, d_delY, w, h, nc);
-        convolute <<<grid_matrix, block_matrix>>> (d_m11conv, d_m11, d_kernel, radius, w, h, 1);
-        convolute <<<grid_matrix, block_matrix>>> (d_m12conv, d_m12, d_kernel, radius, w, h, 1);
-        convolute <<<grid_matrix, block_matrix>>> (d_m22conv, d_m22, d_kernel, radius, w, h, 1);
+        convolute <<<grid_matrix, block_matrix>>> (d_m11conv, d_m11, d_kernel_rho, radius_rho, w, h, 1);
+        convolute <<<grid_matrix, block_matrix>>> (d_m12conv, d_m12, d_kernel_rho, radius_rho, w, h, 1);
+        convolute <<<grid_matrix, block_matrix>>> (d_m22conv, d_m22, d_kernel_rho, radius_rho, w, h, 1);
         eigenvalue <<<grid_matrix, block_matrix>>> (d_lambda1, d_lambda2, d_m11conv, d_m12conv, d_m22conv, w, h);
-        mark_image <<<grid, block>>> (d_imgOut, d_imgIn, d_lambda1, d_lambda2, alpha, beta, w, h, nc);
+        eigenvector <<<grid, block>>> (d_ev1X, d_ev1Y, d_ev2X, d_ev2Y, d_delX, d_delY, w, h);
+        // compute_G <<<grid_matrix, block_matrix>>> (d_m11, d_m12, d_m22, d_ev1X, d_ev1Y, d_ev2X, d_ev2Y, d_lambda1, d_lambda2, alpha, C, w, h, nc);
+        // apply_G <<<grid_matrix, block_matrix>>> (d_delX, d_delY, d_delX, d_delY, d_m11, d_m12, d_m22, w, h, nc);
+        del_x_minus <<<grid, block>>> (d_divX, d_delX, w, h);
+        del_y_minus <<<grid, block>>> (d_divY, d_delY, w, h);
+        addArray <<<grid_sum_up, block_sum_up>>> (d_divergence, d_divX, d_divY, size);
+        if (i == repeats) {
+            make_update <<<grid_matrix, block_matrix>>> (d_imgOut, d_imgIn, d_divergence, tau, w, h, nc);
+        } else {
+            make_update <<<grid_matrix, block_matrix>>> (d_imgIn, d_imgIn, d_divergence, tau, w, h, nc);
+        }
     }
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
@@ -355,29 +512,34 @@ int main(int argc, char **argv)
     cudaMemcpy(h_imgOut, d_imgOut, nbyte, cudaMemcpyDeviceToHost);
     CUDA_CHECK;
 
-
-    // show input image
-    showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
-
-    // show output image: first convert to interleaved opencv format from the layered raw array
-    convert_layered_to_mat(mOut, h_imgOut);
-    showImage("Output", mOut, 100+w+40, 100);
-
-    // ### Display your own output images here as needed
-
-#ifdef CAMERA
-    // end of camera loop
-    }
     // free GPU memory
     cudaFree(d_imgIn);
     CUDA_CHECK;
     cudaFree(d_imgOut);
     CUDA_CHECK;
+    cudaFree(d_conv);
+    CUDA_CHECK;
+    cudaFree(d_kernel);
+    CUDA_CHECK;
+    cudaFree(d_kernel_rho);
+    CUDA_CHECK;
     cudaFree(d_delX);
     CUDA_CHECK;
     cudaFree(d_delY);
     CUDA_CHECK;
-    cudaFree(d_kernel);
+    cudaFree(d_ev1X);
+    CUDA_CHECK;
+    cudaFree(d_ev1Y);
+    CUDA_CHECK;
+    cudaFree(d_ev2X);
+    CUDA_CHECK;
+    cudaFree(d_ev2Y);
+    CUDA_CHECK;
+    cudaFree(d_divX);
+    CUDA_CHECK;
+    cudaFree(d_divY);
+    CUDA_CHECK;
+    cudaFree(d_divergence);
     CUDA_CHECK;
     cudaFree(d_m11);
     CUDA_CHECK;
@@ -395,6 +557,19 @@ int main(int argc, char **argv)
     CUDA_CHECK;
     cudaFree(d_lambda2);
     CUDA_CHECK;
+
+    // show input image
+    showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
+
+    // show output image: first convert to interleaved opencv format from the layered raw array
+    convert_layered_to_mat(mOut, h_imgOut);
+    showImage("Diffusion", mOut, 100+w+40, 100);
+
+    // ### Display your own output images here as needed
+
+#ifdef CAMERA
+    // end of camera loop
+    }
 #else
     // wait for key inputs
     cv::waitKey(0);
@@ -407,7 +582,9 @@ int main(int argc, char **argv)
     // free allocated arrays
     delete[] h_imgIn;
     delete[] h_imgOut;
+    delete[] h_conv;
     delete[] h_kernel;
+    delete[] h_kernel_rho;
     delete[] h_m11;
     delete[] h_m12;
     delete[] h_m22;
