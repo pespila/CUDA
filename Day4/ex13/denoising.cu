@@ -46,6 +46,17 @@ __global__ void fillG(float* G, float* src, float eps, int width, int height) {
     }
 }
 
+__global__ void make_update(float* out, float* in, int width, int height) {
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int c = threadIdx.z + blockDim.z * blockIdx.z;
+
+    int index = x + width * y + width * height * c;
+    if (x < width && y < height) {
+        out[index] = in[index];
+    }
+}
+
 __global__ void jacobi(float* out, float* in, float* f, float* G, float lambda, float eps, int width, int height) {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -81,62 +92,36 @@ __global__ void sor_method(float* out, float* in, float* f, float* G, float lamb
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     int c = threadIdx.z + blockDim.z * blockIdx.z;
 
+    x *= 2;
+    if (y%2 != rb) x++;
 
-        int index = x + width * y + width * height * c;
-        int indexXM = (x-1) + width * y + width * height * c;
-        int indexXP = (x+1) + width * y + width * height * c;
-        int indexYM = x + width * (y-1) + width * height * c;
-        int indexYP = x + width * (y+1) + width * height * c;
+    int index = x + width * y + width * height * c;
+    int indexXM = (x-1) + width * y + width * height * c;
+    int indexXP = (x+1) + width * y + width * height * c;
+    int indexYM = x + width * (y-1) + width * height * c;
+    int indexYP = x + width * (y+1) + width * height * c;
 
-        if (x < width && y < height) {
-            float g_r = x+1 < width ? G[indexXP] : 0.f;
-            float u_r = x+1 < width ? in[indexXP] : 0.f;
+    float zk = 0.f;
+    float z = in[index];
+    float img = f[index];
 
-            float g_u = y+1 < height ? G[indexYP] : 0.f;
-            float u_u = y+1 < height ? in[indexYP] : 0.f;
+    if (x < width && y < height) {
+        float g_r = x+1 < width ? G[indexXP] : 0.f;
+        float u_r = x+1 < width ? in[indexXP] : 0.f;
 
-            float g_l = x > 0 ? G[indexXM] : 0.f;
-            float u_l = x > 0 ? in[indexXM] : 0.f;
+        float g_u = y+1 < height ? G[indexYP] : 0.f;
+        float u_u = y+1 < height ? in[indexYP] : 0.f;
 
-            float g_d = y > 0 ? G[indexYM] : 0.f;
-            float u_d = y > 0 ? in[indexYM] : 0.f;
+        float g_l = x > 0 ? G[indexXM] : 0.f;
+        float u_l = x > 0 ? in[indexXM] : 0.f;
 
-            float denom = 2.f + lambda * (g_r + g_u + g_l + g_d);
+        float g_d = y > 0 ? G[indexYM] : 0.f;
+        float u_d = y > 0 ? in[indexYM] : 0.f;
 
-            if (rb == 1 && (x+y)%2 == 0) {
-                out[index] = (2.f * f[index] + lambda * (g_r * u_r + g_l * u_l + g_u * u_u + g_d * u_d)) / denom;
-                out[index] = out[index] + theta * (out[index] - in[index]);
-            }
-        }
+        float denom = 2.f + lambda * (g_r + g_u + g_l + g_d);
 
-    }
-    if (rb == 0 && (x+2)%2 == 1) {
-
-        int index = x + width * y + width * height * c;
-        int indexXM = (x-1) + width * y + width * height * c;
-        int indexXP = (x+1) + width * y + width * height * c;
-        int indexYM = x + width * (y-1) + width * height * c;
-        int indexYP = x + width * (y+1) + width * height * c;
-
-        if (x < width && y < height) {
-            float g_r = x+1 < width ? G[indexXP] : 0.f;
-            float u_r = x+1 < width ? in[indexXP] : 0.f;
-
-            float g_u = y+1 < height ? G[indexYP] : 0.f;
-            float u_u = y+1 < height ? in[indexYP] : 0.f;
-
-            float g_l = x > 0 ? G[indexXM] : 0.f;
-            float u_l = x > 0 ? in[indexXM] : 0.f;
-
-            float g_d = y > 0 ? G[indexYM] : 0.f;
-            float u_d = y > 0 ? in[indexYM] : 0.f;
-
-            float denom = 2.f + lambda * (g_r + g_u + g_l + g_d);
-
-            out[index] = (2.f * f[index] + lambda * (g_r * u_r + g_l * u_l + g_u * u_u + g_d * u_d)) / denom;
-            out[index] = out[index] + theta * (out[index] - in[index]);
-        }
-
+        zk = (2.f * img + lambda * (g_r * u_r + g_l * u_l + g_u * u_u + g_d * u_d)) / denom;
+        out[index] = zk + theta * (zk - z);
     }
 }
 
@@ -320,27 +305,28 @@ int main(int argc, char **argv)
     for (int i = 1; i <= repeats; i++) {
         // del_x_plus <<<grid, block>>> (d_delX, d_imgIn, w, h);
         // del_y_plus <<<grid, block>>> (d_delY, d_imgIn, w, h);
+        fillG <<<grid, block>>> (d_G, d_imgIn, eps, w, h);
         if (sor) {
-            fillG <<<grid, block>>> (d_G, d_imgIn, eps, w, h);
-            if (i == repeats) {
-                sor_method <<<grid, block>>> (d_imgOut, d_imgIn, d_f, d_G, lambda, theta, eps, 1, w, h);
-                fillG <<<grid, block>>> (d_G, d_imgOut, eps, w, h);
-                sor_method <<<grid, block>>> (d_imgOut, d_imgOut, d_f, d_G, lambda, theta, eps, 0, w, h);
-                // updateArray <<<grid_sum_up, block_sum_up>>> (d_imgOut, d_imgOut, d_sor, size);
-            } else {
-                sor_method <<<grid, block>>> (d_sor, d_imgIn, d_f, d_G, lambda, theta, eps, 1, w, h);
-                fillG <<<grid, block>>> (d_G, d_sor, eps, w, h);
-                sor_method <<<grid, block>>> (d_imgIn, d_sor, d_f, d_G, lambda, theta, eps, 0, w, h);
-                // updateArray <<<grid_sum_up, block_sum_up>>> (d_imgIn, d_imgIn, d_sor, size);
-            }
+            sor_method <<<grid, block>>> (d_imgIn, d_imgIn, d_f, d_G, lambda, theta, eps, 0, w, h);
+            sor_method <<<grid, block>>> (d_imgIn, d_imgIn, d_f, d_G, lambda, theta, eps, 1, w, h);
         } else {
-            fillG <<<grid, block>>> (d_G, d_imgIn, eps, w, h);
-            if (i == repeats) {
-                jacobi <<<grid, block>>> (d_imgOut, d_imgIn, d_f, d_G, lambda, eps, w, h);
-            } else {
-                jacobi <<<grid, block>>> (d_imgIn, d_imgIn, d_f, d_G, lambda, eps, w, h);
-            }
+            jacobi <<<grid, block>>> (d_imgIn, d_imgIn, d_f, d_G, lambda, eps, w, h);
         }
+        // if (sor) {
+        //     if (i == repeats) {
+        //         sor_method <<<grid, block>>> (d_imgOut, d_imgIn, d_f, d_G, lambda, theta, eps, 0, w, h);
+        //         sor_method <<<grid, block>>> (d_imgOut, d_imgIn, d_f, d_G, lambda, theta, eps, 1, w, h);
+        //     } else {
+        //         sor_method <<<grid, block>>> (d_imgIn, d_imgIn, d_f, d_G, lambda, theta, eps, 0, w, h);
+        //         sor_method <<<grid, block>>> (d_imgIn, d_imgIn, d_f, d_G, lambda, theta, eps, 1, w, h);
+        //     }
+        // } else {
+        //     if (i == repeats) {
+        //         jacobi <<<grid, block>>> (d_imgOut, d_imgIn, d_f, d_G, lambda, eps, w, h);
+        //     } else {
+        //         jacobi <<<grid, block>>> (d_imgIn, d_imgIn, d_f, d_G, lambda, eps, w, h);
+        //     }
+        // }
         // apply_g <<<grid, block>>> (d_delX, d_delY, w, h, kind, eps);
         // del_x_minus <<<grid, block>>> (d_divX, d_delX, w, h);
         // del_y_minus <<<grid, block>>> (d_divY, d_delY, w, h);
@@ -355,7 +341,7 @@ int main(int argc, char **argv)
     timer.end();  float t = timer.get();  // elapsed time in seconds
     cout << "time: " << t*1000 << " ms" << endl;
 
-    cudaMemcpy(h_imgOut, d_imgOut, nbyte, cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_imgOut, d_imgIn, nbyte, cudaMemcpyDeviceToHost);
     CUDA_CHECK;
 
     // free GPU memory

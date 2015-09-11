@@ -10,10 +10,16 @@ __global__ void gameOfLifeKernel(unsigned char* d_src, unsigned char* d_dst, con
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     int index = x + width * y;
-    int left = x != 0 ? (x-1) + width * y : -1;
+    int left = x > 0 ? (x-1) + width * y : -1;
     int right = x < width-1 ? (x+1) + width * y : -1;
-    int top = y != 0 ? x + width * (y-1) : -1;
+    int top = y > 0 ? x + width * (y-1) : -1;
     int bottom = y < height-1 ? x + width * (y+1) : -1;
+
+    int top_left = x > 0 && y > 0 ? (x-1) + width * (y-1) : -1;
+    int top_right = x < width-1 && y > 0 ? (x+1) + width * (y-1) : -1;
+    int bottom_left = x > 0 && y < height-1 ? (x-1) + width * (y+1) : -1;
+    int bottom_right = x < width-1 && y < height-1 ? (x+1) + width * (y+1) : -1;
+
     int status = d_src[index];
     int counter = 0;
     if (x < width && y < height) {
@@ -28,6 +34,19 @@ __global__ void gameOfLifeKernel(unsigned char* d_src, unsigned char* d_dst, con
         }
         if (right != -1) {
             counter += d_src[right] == 1 ? 1 : 0;
+        }
+
+        if (top_left != -1) {
+            counter += d_src[top_left] == 1 ? 1 : 0;
+        }
+        if (top_right != -1) {
+            counter += d_src[top_right] == 1 ? 1 : 0;
+        }
+        if (bottom_left != -1) {
+            counter += d_src[bottom_left] == 1 ? 1 : 0;
+        }
+        if (bottom_right != -1) {
+            counter += d_src[bottom_right] == 1 ? 1 : 0;
         }
 
         if (status == 1) {
