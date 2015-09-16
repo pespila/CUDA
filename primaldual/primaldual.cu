@@ -17,15 +17,11 @@
 
 #include "aux.h"
 #include <iostream>
+#include <stdio.h>
 using namespace std;
 
 // uncomment to use the camera
 // #define CAMERA
-
-__device__ float interpolate(float k, float uk0, float uk1, float l)
-{
-    return (k + (0.5 - uk0) / (uk1 - uk0)) / l;
-}
 
 inline __device__ float l2Norm(float x1, float x2)
 {
@@ -37,104 +33,108 @@ inline __device__ float bound(float x1, float x2, float lambda, float k, float L
     return 0.25f * (x1*x1 + x2*x2) - lambda * pow(k / L - f, 2);
 }
 
-__device__ void project(float* x1, float* x2, float* x3, const float* img, float L, float lambda, float k, int i, int il)
+__device__ float interpolate(float k, float uk0, float uk1, float l)
 {
-    float f = img[i];
-    float y = x3[il] + lambda * pow(k / L - f, 2);
-    float norm = l2Norm(x1[il], x2[il]);
+    return (k + (0.5 - uk0) / (uk1 - uk0)) / l;
+}
+
+__device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2, float x3, float f, float L, float lambda, float k, int j)
+{
+    float y = x3 + lambda * pow(k / L - f, 2);
+    float norm = l2Norm(x1, x2);
     float v = 0.f;
     float a = 2.f * 0.25f * norm;
     float b = 2.f / 3.f * (1.f - 2.f * 0.25f * y);
-    float d = b < 0 ? (a - pow(sqrt(-b), 3)) * (a + pow(sqrt(-b), 3)) : a * a + b * b * b;
-    float c = pow((a + sqrt(d)), 1.f / 3.f);
+    float d = b < 0 ? (a - pow(sqrt(-b), 3)) * (a + pow(sqrt(-b), 3)) : a*a + b*b*b;
+    float c = pow((a + sqrt(d)), 1.f/3.f);
     if (d >= 0) {
         v = c != 0 ? c - b / c : 0.f;
     } else {
         v = 2.f * sqrt(-b) * cos((1.f / 3.f) * acos(a / (pow(sqrt(-b), 3))));
     }
-    x1[il] = norm != 0 ? (v / (2.0 * 0.25f)) * x1[il] / norm : 0.f;
-    x2[il] = norm != 0 ? (v / (2.0 * 0.25f)) * x2[il] / norm : 0.f;
-    x3[il] = bound(x1[il], x2[il], lambda, k, L, img[i]);
+    u1[j] = norm != 0 ? (v / (2.0 * 0.25f)) * x1 / norm : 0.f;
+    u2[j] = norm != 0 ? (v / (2.0 * 0.25f)) * x2 / norm : 0.f;
+    u3[j] = bound(u1[j], u2[j], lambda, k, L, f);
 }
 
-__global__ void parabolaProjection(float* x1, float* x2, float* x3, const float* img, float L, float lambda, int w, int h, int l)
+__global__ void project_on_parabola(float* u1, float* u2, float* u3, float* v1, float* v2, float* v3, float* img, float L, float lambda, int w, int h, int l)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int z = threadIdx.z + blockDim.z * blockIdx.z;
     
-    int i = x + w * y;
+    int index = x + w * y;
+    int i = x + w * y + w * h * z + 0 * w * h * l;
+    int j = x + w * y + w * h * z + 1 * w * h * l;
+
+    float bound_val;
+    float x1;
+    float x2;
+    float x3;
+    float f;
+
+    if (x < w && y < h && z < l)
+    {
+        f = img[index];
+        x1 = u1[i] - v1[j];
+        x2 = u2[i] - v2[j];
+        x3 = u3[i] - v3[j];
+        bound_val = bound(x1, x2, lambda, z, L, f);
+
+        if (x3 < bound_val) {
+            on_parabola(u1, u2, u3, x1, x2, x3, f, L, lambda, z, j);
+        } else {
+            u1[j] = x1;
+            u2[j] = x2;
+            u3[j] = x3;
+        }
+    }
+}
+
+__global__ void soft_shrinkage(float* u1, float* u2, float* u3, float* v1, float* v2, float* v3, float nu, int k1, int k2, int P, int w, int h, int l)
+{
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+
+    int i;
+    int j;
+    
+    const float K = (float)(k2 - k1 + 1);
+
     if (x < w && y < h)
     {
-        int il;
-        float bound_val;
+        float s1 = 0.f;
+        float s2 = 0.f;
+        float s01 = 0.f;
+        float s02 = 0.f;
+
+        for (int k = k1; k <= k2; k++)
+        {
+            i = x + w * y + k * w * h + P * w * h * l;
+            j = x + w * y + k * w * h + (P-1) * w * h * l;
+            s01 += (u1[j] - v1[i]);
+            s02 += (u2[j] - v2[i]);
+        }
+
+        float norm = l2Norm(s01, s02);
+
+        s1 = norm <= nu ? s01 : s01 / norm;
+        s2 = norm <= nu ? s02 : s02 / norm;
+
         for (int k = 0; k < l; k++)
         {
-            il = i + k * w * h;
-            bound_val = bound(x1[il], x2[il], lambda, k, L, img[i]);
-            if (x3[il] < bound_val)
-            {
-                project(x1, x2, x3, img, L, lambda, k, i, il);
+            i = x + w * y + k * w * h + P * w * h * l;
+            j = x + w * y + k * w * h + (P-1) * w * h * l;
+            if (k >= k1 && k <= k2) {
+                u1[i] = (u1[j] - v1[i]) + (s1 - s01) / K;
+                u2[i] = (u2[j] - v2[i]) + (s2 - s02) / K;
+            } else {
+                u1[i] = u1[j] - v1[i];
+                u2[i] = u2[j] - v2[i];
             }
         }
     }
 }
-//     void SoftShrinkage(primaldual::Vector<F>& dst, primaldual::Vector<F>& src, int i, int j, int k, int k1, int k2, F nu) {
-//         if (dst.Size() != 3) {
-//             cout << "ERROR 10 (SoftShrinkage): Size of dst does not match!" << endl;
-//         } else {
-//             F K = (F)(k2 - k1 + 1);
-//             primaldual::Vector<F> s(1, 2, 0.0);
-//             primaldual::Vector<F> s0(1, 2, 0.0);
-//             for (int l = k1; l <= k2; l++) {
-//                 for (int c = 0; c < 2; c++) {
-//                     s0.Set(0, c, s0.Get(0, c) + src.Get(i, j, l, c));
-//                 }
-//             }
-//             L2(s, s0, nu);
-//             for (int c = 0; c < 2; c++) {
-//                 if (k >= k1 && k <= k2) {
-//                     dst.Set(0, c, src.Get(i, j, k, c) + ((s.Get(0, c) - s0.Get(0, c)) / K));
-//                 } else {
-//                     dst.Set(0, c, src.Get(i, j, k, c));
-//                 }
-//             }
-//         }
-//     }
-
-// __global__ softShrinkage(float* x1, float* x2, float* x3, float nu, int k1, int k2, int w, int h, int l)
-// {
-//     int x = threadIdx.x + blockDim.x * blockIdx.x;
-//     int y = threadIdx.y + blockDim.y * blockIdx.y;
-
-//     int i = x + w * y;
-//     float K = (float)(k2 - k1 + 1);
-
-//     if (x < w && y < h)
-//     {
-//         float s1 = 0.f;
-//         float s2 = 0.f;
-//         float s01 = 0.f;
-//         float s02 = 0.f;
-
-//         for (int k = k1; k <= k2; k++)
-//         {
-//             s01 += x1[i + j * w * h];
-//             s02 += x2[i + j * w * h];
-//         }
-
-//         float norm = l2Norm(s01, s02);
-//         if (norm <= nu)
-//         {
-//             s1 = s01;
-//             s2 = s02;
-//         } else {
-//             s1 = s01 / norm;
-//             s2 = s02 / norm;
-//         }
-
-//         if ()
-//     }
-// }
 
 __global__ void init(float* xbar, float* xcur, float* xn, float* img, int w, int h, int l)
 {
@@ -160,6 +160,26 @@ __global__ void init(float* xbar, float* xcur, float* xn, float* img, int w, int
         }
     }
 }
+
+// __global__ void init(float* xbar, float* xcur, float* xn, float* img, int w, int h, int l)
+// {
+//     int x = threadIdx.x + blockDim.x * blockIdx.x;
+//     int y = threadIdx.y + blockDim.y * blockIdx.y;
+    
+//     int i = x + w * y;
+//     int index;
+//     float img_val;
+//     if (x < w && y < h)
+//     {
+//         img_val = img[i];
+//         for (int k = 0; k < l; k++)
+//         {
+//             xn[index] = img_val;
+//             xcur[index] = img_val;
+//             xbar[index] = img_val;
+//         }
+//     }
+// }
 
 __global__ void isosurface(float* img, float* xbar, int w, int h, int l)
 {
@@ -194,6 +214,83 @@ __global__ void isosurface(float* img, float* xbar, int w, int h, int l)
     }
 }
 
+__global__ void set_y(float* y1, float* y2, float* y3, float* u1, float* u2, float* u3, int h, int w, int l, int p)
+{
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int z = threadIdx.z + blockDim.z * blockIdx.z;
+    
+    int i = x + w * y + w * h * z + 0 * w * h * l;
+    int j = x + w * y + w * h * z + (p-1) * w * h * l;
+
+    if (x < w && y < h && z < l)
+    {
+        y1[i] = u1[j];
+        y2[i] = u2[j];
+        y3[i] = u3[j];
+    }
+}
+__global__ void set_u_v(float* u1, float* u2, float* u3, float* v1, float* v2, float* v3, float* y1, float* y2, float* y3, int h, int w, int l, int p)
+{
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int z = threadIdx.z + blockDim.z * blockIdx.z;
+    
+    int i = x + w * y + w * h * z;
+    int j;
+
+    if (x < w && y < h && z < l)
+    {
+        for (int k = 0; k < p; k++)
+        {
+            j = x + w * y + w * h * z + k * w * h * l;
+
+            u1[j] = k < p-1 ? 0.f : y1[i];
+            u2[j] = k < p-1 ? 0.f : y2[i];
+            u3[j] = k < p-1 ? 0.f : y3[i];
+
+            v1[j] = 0.f;
+            v2[j] = 0.f;
+            v3[j] = 0.f;
+            
+        }
+    }
+}
+
+__global__ void update_v(float* v1, float* v2, float* v3, float* u1, float* u2, float* u3, int h, int w, int l, int k)
+{
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int z = threadIdx.z + blockDim.z * blockIdx.z;
+    
+    int i = x + w * y + w * h * z + k * w * h * l;
+    int j = x + w * y + w * h * z + (k-1) * w * h * l;
+
+    if (x < w && y < h && z < l)
+    {
+        v1[i] = u1[i] - (u1[j] - v1[i]);
+        v2[i] = u2[i] - (u2[j] - v2[i]);
+        v3[i] = u3[i] - (u3[j] - v3[i]);
+    }
+}
+
+__global__ void set_u_zero(float* u1, float* u2, float* u3, int h, int w, int l, int p)
+{
+    int x = threadIdx.x + blockDim.x * blockIdx.x;
+    int y = threadIdx.y + blockDim.y * blockIdx.y;
+    int z = threadIdx.z + blockDim.z * blockIdx.z;
+    
+    int i = x + w * y + w * h * z + 0 * w * h * l;
+    int j = x + w * y + w * h * z + (p-1) * w * h * l;
+
+    if (x < w && y < h && z < l)
+    {
+        u1[i] = u1[j];
+        u2[i] = u2[j];
+        u3[i] = u3[j];
+    }
+}
+
 __global__ void gradient(float* dx, float* dy, float* dz, float* y1, float* y2, float* y3, float* v, float sigma, int w, int h, int l)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
@@ -224,15 +321,23 @@ __global__ void clipping(float* xn, float* y1, float* y2, float* y3, float* xcur
     int xi = (x-1) + w * y + w * h * z;
     int yi = x + w * (y-1) + w * h * z;
     int zi = x + w * y + w * h * (z-1);
+    
+    float d1, d2, d3, val;
 
     if (x < w && y < h && z < l)
     {
-        float d1, d2, d3, val;
         d1 = y1[i]-y1[min(max(0, xi), w-1)];
         d2 = y2[i]-y2[min(max(0, yi), h-1)];
         d3 = y3[i]-y3[min(max(0, zi), l-1)];
         val = xcur[i] + tau * (d1 + d2 + d3);
-        xn[i] = fmin(1.f, fmax(0.f, val));
+        
+        if (z == 0) {
+            xn[i] = 1.f;
+        } else if (z == l-1) {
+            xn[i] = 0.f;
+        } else {
+            xn[i] = fmin(1.f, fmax(0.f, val));
+        }
     }
 }
 
@@ -290,7 +395,7 @@ int main(int argc, char **argv)
     cout << "gray: " << gray << endl;
 
     // load the input image as grayscale if "-gray" is specifed
-    int level = 8;
+    int level = 16;
     getParam("level", level, argc, argv);
     cout << "level: " << level << endl;
 
@@ -308,6 +413,16 @@ int main(int argc, char **argv)
     float tau = 1.f/L;
     getParam("tau", tau, argc, argv);
     cout << "tau: " << tau << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float lambda = 0.1;
+    getParam("lambda", lambda, argc, argv);
+    cout << "lambda: " << lambda << endl;
+
+    // load the input image as grayscale if "-gray" is specifed
+    float nu = 5.f;
+    getParam("nu", nu, argc, argv);
+    cout << "nu: " << nu << endl;
 
     // Init camera / Load input image
 #ifdef CAMERA
@@ -339,11 +454,14 @@ int main(int argc, char **argv)
     // get image dimensions
     int w = mIn.cols;         // width
     int h = mIn.rows;         // height
-    int nc = mIn.channels();  // number of channels
+    int nc = 1;  // number of channels
+    // int nc = mIn.channels();  // number of channels
     int dim = w*h*nc;
     int size = w*h*nc*level;
+    int projections = level * (level+1) / 2 + 1 + 1;
     int nbytes = size*sizeof(float);
     int nbyted = dim*sizeof(float);
+    int nbytep = projections*size*sizeof(float);
     cout << "image: " << w << " x " << h << endl;
 
     cv::Mat mOut(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
@@ -367,6 +485,18 @@ int main(int argc, char **argv)
     float* d_y1; cudaMalloc(&d_y1, nbytes); CUDA_CHECK;
     float* d_y2; cudaMalloc(&d_y2, nbytes); CUDA_CHECK;
     float* d_y3; cudaMalloc(&d_y3, nbytes); CUDA_CHECK;
+
+    float* d_u1; cudaMalloc(&d_u1, nbytep); CUDA_CHECK;
+    float* d_u2; cudaMalloc(&d_u2, nbytep); CUDA_CHECK;
+    float* d_u3; cudaMalloc(&d_u3, nbytep); CUDA_CHECK;
+
+    float* d_v1; cudaMalloc(&d_v1, nbytep); CUDA_CHECK;
+    float* d_v2; cudaMalloc(&d_v2, nbytep); CUDA_CHECK;
+    float* d_v3; cudaMalloc(&d_v3, nbytep); CUDA_CHECK;
+
+    // size_t available, total;
+    // cudaMemGetInfo(&available, &total);
+    // cout << available << " " << total << endl;
 
     // alloc GPU memory
 
@@ -405,18 +535,41 @@ int main(int argc, char **argv)
 
     Timer timer; timer.start();
 
+    int count_p;
+
     init <<<grid_iso, block_iso>>> (d_xbar, d_xcur, d_x, d_imgIn, w, h, level);
     for (int i = 0; i < repeats; i++)
     {
+        cout << "Step " << i+1 << " of " << repeats << endl;
         gradient <<<grid, block>>> (d_delX, d_delY, d_delZ, d_y1, d_y2, d_y3, d_xbar, sigma, w, h, level);
+        set_u_v <<<grid, block>>> (d_u1, d_u2, d_u3, d_v1, d_v2, d_v3, d_delX, d_delY, d_delZ, w, h, level, projections);
         for (int j = 0; j < dykstra; j++)
         {
-        //     boyle_dykstra <<<grid, block>>> (d_y1, d_y2, d_y3, d_delX, d_delY, d_delZ, d_imgIn, L, lambda, w, h, level);
+            count_p = 1;
+            set_u_zero <<<grid, block>>> (d_u1, d_u2, d_u3, w, h, level, projections);
+            
+            project_on_parabola <<<grid, block>>> (d_u1, d_u2, d_u3, d_v1, d_v2, d_v3, d_imgIn, L, lambda, w, h, level);
+            count_p++;
+            
+            for (int k1 = 0; k1 < level; k1++)
+            {
+                for (int k2 = k1; k2 < level; k2++)
+                {
+                    soft_shrinkage <<<grid_iso, block_iso>>> (d_u1, d_u2, d_u3, d_v1, d_v2, d_v3, nu, k1, k2, count_p, w, h, level);
+                    count_p++;
+                }
+            }
+
+            for (int k = 1; k < projections; k++)
+            {
+                update_v <<<grid, block>>> (d_v1, d_v2, d_v3, d_u1, d_u2, d_u3, w, h, level, k);
+            }
         }
+        set_y <<<grid, block>>> (d_y1, d_y2, d_y3, d_u1, d_u2, d_u3, w, h, level, projections);
         clipping <<<grid, block>>> (d_x, d_y1, d_y2, d_y3, d_xcur, tau, w, h, level);
         extrapolate <<<grid, block>>> (d_xbar, d_x, d_xcur, w, h, level);
     }
-    isosurface <<<grid_iso, block_iso>>> (d_imgOut, d_xbar, w, h, level);
+    isosurface <<<grid_iso, block_iso>>> (d_imgOut, d_x, w, h, level);
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
     cout << "time: " << t*1000 << " ms" << endl;
@@ -439,6 +592,14 @@ int main(int argc, char **argv)
     cudaFree(d_y1); CUDA_CHECK;
     cudaFree(d_y2); CUDA_CHECK;
     cudaFree(d_y3); CUDA_CHECK;
+
+    cudaFree(d_u1); CUDA_CHECK;
+    cudaFree(d_u2); CUDA_CHECK;
+    cudaFree(d_u3); CUDA_CHECK;
+
+    cudaFree(d_v1); CUDA_CHECK;
+    cudaFree(d_v2); CUDA_CHECK;
+    cudaFree(d_v3); CUDA_CHECK;
 
     // show input image
     showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
