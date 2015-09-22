@@ -68,7 +68,7 @@ __device__ float bound(float x1, float x2, float lambda, float k, float L, float
 
 __device__ float interpolate(float k, float uk0, float uk1, float l)
 {
-    return (k/l + (0.5 - uk0) / (uk1 - uk0));
+    return (k + (0.5 - uk0) / (uk1 - uk0)) / (l-1);
 }
 
 __device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2, float x3, float f, float L, float lambda, float k, int i)
@@ -148,8 +148,8 @@ __global__ void soft_shrinkage(float* u1, float* u2, float* u3, float* tmp1, flo
 
         float norm = l2Norm(s01, s02);
 
-        s1 = norm <= nu ? s01 : nu * s01 / norm;
-        s2 = norm <= nu ? s02 : nu * s02 / norm;
+        s1 = norm <= nu ? s01 : (nu * s01 / norm);
+        s2 = norm <= nu ? s02 : (nu * s02 / norm);
 
         for (int k = 0; k < l; k++)
         {
