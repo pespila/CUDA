@@ -88,12 +88,12 @@ __device__ float bound(float x1, float x2, float lambda, float k, float L, float
 
 __device__ float interpolate(float k, float uk0, float uk1, float l)
 {
-    return (k + (0.5 - uk0) / (uk1 - uk0)) / (l-1);
+    return (k + (0.5 - uk0) / (uk1 - uk0)) / l;
 }
 
-__device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2, float x3, float f, float L, float lambda, float k, int j)
+__device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2, float x3, float f, float L, float lambda, float k, int j, float level)
 {
-    float y = x3 + lambda * pow(k / L - f, 2);
+    float y = x3 + lambda * pow(k / level - f, 2);
     float norm = l2Norm(x1, x2);
     float v = 0.f;
     float a = 2.f * 0.25f * norm;
@@ -204,7 +204,7 @@ __global__ void project_on_parabola(float* u1, float* u2, float* u3, float* v1, 
         float bound_val = bound(x1, x2, lambda, z+1.f, L, f);
 
         if (x3 < bound_val) {
-            on_parabola(u1, u2, u3, x1, x2, x3, f, L, lambda, z+1.f, j);
+            on_parabola(u1, u2, u3, x1, x2, x3, f, L, lambda, z+1.f, j, l);
             // ProjectParabolaGeneral(0.288675f, 0.f, 0.25f, 0.f, bound_val, x1, x3);
         } else {
             u1[j] = x1;
@@ -306,7 +306,7 @@ __global__ void isosurface(float* img, float* xbar, int w, int h, int l)
             uk0 = xbar[x + w * y + k * w * h];
             uk1 = xbar[x + w * y + (k+1) * w * h];
             if (uk0 > 0.5 && uk1 <= 0.5) {
-                val = interpolate(k, uk0, uk1, l);
+                val = interpolate(k+1, uk0, uk1, l);
                 break;
             } else {
                 val = 1.f;
@@ -781,6 +781,7 @@ int main(int argc, char **argv)
 
     int count_p = projections;
     float sum = 0.f;
+    // float tmp = 0.f;
 
     init <<<grid_iso, block_iso>>> (d_xbar, d_xcur, d_x, d_y1, d_y2, d_y3, d_imgIn, w, h, level);
     // cudaMemcpy(h_x1, d_xcur, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
@@ -876,14 +877,17 @@ int main(int argc, char **argv)
                     float d = x1+x2+x3;
                     if (d <= 0) {
                         sum += 1.f;
-                        h_r[jx + w * ix + w * h * kx] = 0.f;
-                    } else {
-                        h_r[jx + w * ix + w * h * kx] = 1.f;
                     }
                 }
             }
         }
         printf("%d %f\n", i, sqrtf(sum));
+        // if (i%30 == 0) {
+        //     if (abs(sqrtf(tmp) - sqrtf(sum)) < 1E-6) {
+        //         break;
+        //     }
+        //     tmp = sum;
+        // }
 
         // Print3D(h_x1, h_x2, h_x3, w, h, level);
         clipping <<<grid, block>>> (d_x, d_xcur, d_y1, d_y2, d_y3, tau, w, h, level);
