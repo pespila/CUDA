@@ -81,9 +81,9 @@ __device__ float l2Norm(float x1, float x2)
     return sqrtf(x1*x1 + x2*x2);
 }
 
-__device__ float bound(float x1, float x2, float lambda, float k, float L, float f)
+__device__ float bound(float x1, float x2, float lambda, float k, float level, float f)
 {
-    return 0.25f * (x1*x1 + x2*x2) - lambda * pow(k / L - f, 2);
+    return 0.25f * (x1*x1 + x2*x2) - lambda * pow(k / level - f, 2);
 }
 
 __device__ float interpolate(float k, float uk0, float uk1, float l)
@@ -107,7 +107,7 @@ __device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2,
     }
     u1[j] = norm == 0 ? 0.f : (v / (2.0 * 0.25f)) * x1 / norm;
     u2[j] = norm == 0 ? 0.f : (v / (2.0 * 0.25f)) * x2 / norm;
-    u3[j] = bound(u1[j], u2[j], lambda, k, L, f);
+    u3[j] = bound(u1[j], u2[j], lambda, k, level, f);
 }
 
 // /**
@@ -201,7 +201,7 @@ __global__ void project_on_parabola(float* u1, float* u2, float* u3, float* v1, 
         float x1 = u1[i] - v1[j];
         float x2 = u2[i] - v2[j];
         float x3 = u3[i] - v3[j];
-        float bound_val = bound(x1, x2, lambda, z+1.f, L, f);
+        float bound_val = bound(x1, x2, lambda, z+1.f, l, f);
 
         if (x3 < bound_val) {
             on_parabola(u1, u2, u3, x1, x2, x3, f, L, lambda, z+1.f, j, l);
@@ -781,7 +781,7 @@ int main(int argc, char **argv)
 
     int count_p = projections;
     float sum = 0.f;
-    // float tmp = 0.f;
+    float tmp = 0.f;
 
     init <<<grid_iso, block_iso>>> (d_xbar, d_xcur, d_x, d_y1, d_y2, d_y3, d_imgIn, w, h, level);
     // cudaMemcpy(h_x1, d_xcur, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
@@ -882,12 +882,12 @@ int main(int argc, char **argv)
             }
         }
         printf("%d %f\n", i, sqrtf(sum));
-        // if (i%30 == 0) {
-        //     if (abs(sqrtf(tmp) - sqrtf(sum)) < 1E-6) {
-        //         break;
-        //     }
-        //     tmp = sum;
-        // }
+        if (i%30 == 0) {
+            if (abs(sqrtf(tmp) - sqrtf(sum)) < 1E-6) {
+                break;
+            }
+            tmp = sum;
+        }
 
         // Print3D(h_x1, h_x2, h_x3, w, h, level);
         clipping <<<grid, block>>> (d_x, d_xcur, d_y1, d_y2, d_y3, tau, w, h, level);
