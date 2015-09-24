@@ -1,0 +1,23 @@
+COMMAND:
+./primaldual_dykstra -i "../images/marylin.png" -level 8 -repeats 400 -dykstra 10 -nu 0.001 -lambda 0.1
+
+PARAMETER:
+L = sqrt(12)
+tau = 1/L
+sigma = 1/(L*L*tau) = 1/L
+N = 127
+M = 8
+nu = 0.001
+lambda = 0.1
+Dykstra iterations per Primal-Dual cycle: 10
+Iterations of Primal-Dual: 400
+
+RUNTIME:
+27811.9 ms = 27 s
+
+GPU MEMORY:
+2146762752 - 834281472 = 1312481280 Bytes = 1.31 GB
+(total memory - availabe after init = used memory)
+
+USED IMAGE:
+marilyn.png
