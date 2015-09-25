@@ -52,9 +52,9 @@ __device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2,
     } else {
         v = 2.f * sqrt(-b) * cos((1.f / 3.f) * acos(a / (pow(sqrt(-b), 3))));
     }
-    // u1[j] = norm == 0 ? 0.f : (v / (2.0 * 0.25f)) * x1 / norm;
-    // u2[j] = norm == 0 ? 0.f : (v / (2.0 * 0.25f)) * x2 / norm;
-    // u3[j] = bound(u1[j], u2[j], lambda, k, l, f);
+    u1[j] = norm == 0 ? 0.f : (v / (2.0 * 0.25f)) * x1 / norm;
+    u2[j] = norm == 0 ? 0.f : (v / (2.0 * 0.25f)) * x2 / norm;
+    u3[j] = bound(u1[j], u2[j], lambda, k, l, f);
 }
 
 __global__ void init(float* xbar, float* xcur, float* xn, float* y1, float* y2, float* y3, float* p1, float* p2, float* l1, float* l2, float* l1bar, float* l2bar, float* l1cur, float* l2cur, float* img, int w, int h, int l, int p)
@@ -322,8 +322,7 @@ int main(int argc, char **argv)
     // get image dimensions
     int w = mIn.cols;         // width
     int h = mIn.rows;         // height
-    int nc = 1;  // number of channels
-    // int nc = mIn.channels();  // number of channels
+    int nc = mIn.channels();  // number of channels
     int dim = w*h*nc;
     int size = w*h*nc*level;
     int proj = level * (level+1) / 2;

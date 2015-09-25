@@ -70,18 +70,18 @@ __global__ void project_on_parabola(float* u1, float* u2, float* u3, float* v1, 
         int i = x + w * y + w * h * z + (k-1) * w * h * l;
         int j = x + w * y + w * h * z + k * w * h * l;
 
-        // float lam = lambda;
-        // if ((x >= 14 && x <= 112) && (y >= 14 && y <= 112)) {
-        //     lam = 0.f;
-        // }
+        float lam = lambda;
+        if ((x >= 14 && x <= 112) && (y >= 14 && y <= 112)) {
+            lam = 0.f;
+        }
         float f = img[index];
         float x1 = u1[i] - v1[j];
         float x2 = u2[i] - v2[j];
         float x3 = u3[i] - v3[j];
-        float bound_val = bound(x1, x2, lambda, (z+1.f), l, f);
+        float bound_val = bound(x1, x2, lam, (z+1.f), l, f);
 
         if (x3 < bound_val) {
-            on_parabola(u1, u2, u3, x1, x2, x3, f, L, lambda, (z+1.f), j, l);
+            on_parabola(u1, u2, u3, x1, x2, x3, f, L, lam, (z+1.f), j, l);
         } else {
             u1[j] = x1;
             u2[j] = x2;
