@@ -340,6 +340,12 @@ int main(int argc, char **argv)
     if (!ret) cerr << "ERROR: no image specified" << endl;
     if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> [-repeats <repeats>] [-gray]" << endl; return 1; }
 
+    // output image
+    string output = "";
+    bool retO = getParam("o", output, argc, argv);
+    if (!retO) cerr << "ERROR: no output image specified" << endl;
+    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> [-repeats <repeats>] [-gray]" << endl; return 1; }
+
 #endif
     
     // number of computation repetitions to get a better run time measurement
@@ -604,12 +610,12 @@ int main(int argc, char **argv)
     }
 #else
     // wait for key inputs
-    cv::waitKey(0);
+    // cv::waitKey(0);
 #endif
 
     // save input and result
-    cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
-    cv::imwrite("image_result.png",mOut*255.f);
+    // cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
+    cv::imwrite(output, mOut*255.f);
 
     // free allocated arrays
     delete[] h_imgIn;

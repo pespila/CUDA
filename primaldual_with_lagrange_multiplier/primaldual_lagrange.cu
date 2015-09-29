@@ -113,19 +113,21 @@ __global__ void parabola(float* y1, float* y2, float* y3, float* l1, float* l2, 
         {
             for (int k2 = k1; k2 < l; k2++)
             {
-                l1sum += l1[x + w * y + w * h * K];
-                l2sum += l2[x + w * y + w * h * K];
+                if (z <= k2 && z >= k1) {
+                    l1sum += l1[x + w * y + w * h * K];
+                    l2sum += l2[x + w * y + w * h * K];
+                }
                 K++;
             }
         }
 
-        x1 = y1[i] + sigma * (x1 + l1sum);
-        x2 = y2[i] + sigma * (x2 + l2sum);
+        x1 = y1[i] + sigma * (x1 - l1sum);
+        x2 = y2[i] + sigma * (x2 - l2sum);
         x3 = y3[i] + sigma * x3;
 
         float bound_val = bound(x1, x2, lambda, (z+1.f), l, f);
         if (x3 < bound_val) {
-            on_parabola(y1, y2, y3, x1, x2, x3, f, 0.f, lambda, (z+1.f), x + w * y + w * h * z, l);
+            on_parabola(y1, y2, y3, x1, x2, x3, f, 0.f, lambda, (z+1.f), i, l);
         } else {
             y1[x + w * y + w * h * z] = x1;
             y2[x + w * y + w * h * z] = x2;
@@ -141,6 +143,9 @@ __global__ void l2projection(float* p1, float* p2, float* l1bar, float* l2bar, f
     
     if (x < w && y < h)
     {
+        float x1;
+        float x2;
+        float norm;
         int i;
         int K = 0;
         for (int k1 = 0; k1 < l; k1++)
@@ -148,13 +153,13 @@ __global__ void l2projection(float* p1, float* p2, float* l1bar, float* l2bar, f
             for (int k2 = k1; k2 < l; k2++)
             {
                 i = x + w * y + w * h * K;
-                float x1 = p1[i] + sigma * l1bar[i];
-                float x2 = p2[i] + sigma * l2bar[i];
+                x1 = p1[i] + sigma * l1bar[i];
+                x2 = p2[i] + sigma * l2bar[i];
 
-                float norm = l2Norm(x1, x2);
+                norm = l2Norm(x1, x2);
                 
-                p1[i] = norm <= nu ? x1 : x1/norm * nu;
-                p2[i] = norm <= nu ? x2 : x2/norm * nu;
+                p1[i] = (norm <= nu) ? x1 : nu * x1/norm;
+                p2[i] = (norm <= nu) ? x2 : nu * x2/norm;
                 K++;
             }
         }
@@ -207,26 +212,51 @@ __global__ void update_lambda(float* l1, float* l2, float* l1cur, float* l2cur, 
     }
 }
 
-__global__ void extrapolate(float* xbar, float* l1bar, float* l2bar, float* xcur, float* l1cur, float* l2cur, float* xn, float* l1, float* l2, int w, int h, int l, int p)
+// __global__ void extrapolate(float* xbar, float* l1bar, float* l2bar, float* xcur, float* l1cur, float* l2cur, float* xn, float* l1, float* l2, int w, int h, int l, int p)
+// {
+//     int x = threadIdx.x + blockDim.x * blockIdx.x;
+//     int y = threadIdx.y + blockDim.y * blockIdx.y;
+//     int z = threadIdx.z + blockDim.z * blockIdx.z;
+    
+//     if (x < w && y < h && z < l) {
+//         int i = x + w * y + w * h * z;
+//         int j;
+
+//         xbar[i] = 2.f * xn[i] - xcur[i];
+//         xcur[i] = xn[i];
+        
+//         for (int k = 0; k < p; k++)
+//         {
+//             j = x + w * y + w * h * k;
+//             l1bar[j] = 2.f * l1[j] - l1cur[j];
+//             l1cur[j] = l1[j];
+//             l2bar[j] = 2.f * l2[j] - l2cur[j];
+//             l2cur[j] = l2[j];
+//         }
+//     }
+// }
+
+__global__ void extrapolate(float* xbar, float* l1bar, float* l2bar, float* xcur, float* l1cur, float* l2cur, float* xn, float* l1, float* l2, int w, int h, int l)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
-    int z = threadIdx.z + blockDim.z * blockIdx.z;
     
-    if (x < w && y < h && z < l) {
-        int i = x + w * y + w * h * z;
-        int j;
-
-        xbar[i] = 2.f * xn[i] - xcur[i];
-        xcur[i] = xn[i];
-        
-        for (int k = 0; k < p; k++)
+    if (x < w && y < h) {
+        int i, j, K = 0;
+        for (int k1 = 0; k1 < l; k1++)
         {
-            j = x + w * y + w * h * k;
-            l1bar[j] = 2.f * l1[j] - l1cur[j];
-            l1cur[j] = l1[j];
-            l2bar[j] = 2.f * l2[j] - l2cur[j];
-            l2cur[j] = l2[j];
+            i = x + w * y + w * h * k1;
+            for (int k2 = k1; k2 < l; k2++)
+            {
+                j = x + w * y + w * h * K;
+                l1bar[j] = 2.f * l1[j] - l1cur[j];
+                l2bar[j] = 2.f * l2[j] - l2cur[j];
+                l1cur[j] = l1[j];
+                l2cur[j] = l2[j];
+                K++;
+            }
+            xbar[i] = 2.f * xn[i] - xcur[i];
+            xcur[i] = xn[i];
         }
     }
 }
@@ -279,6 +309,12 @@ int main(int argc, char **argv)
     if (!ret) cerr << "ERROR: no image specified" << endl;
     if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> [-repeats <repeats>] [-gray]" << endl; return 1; }
 
+    // output image
+    string output = "";
+    bool retO = getParam("o", output, argc, argv);
+    if (!retO) cerr << "ERROR: no output image specified" << endl;
+    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> [-repeats <repeats>] [-gray]" << endl; return 1; }
+
 #endif
     
     // number of computation repetitions to get a better run time measurement
@@ -307,7 +343,7 @@ int main(int argc, char **argv)
     cout << "taul: " << taul << endl;
     
     // load the input image as grayscale if "-gray" is specifed
-    float sigmay = 1.f / (3 + level);
+    float sigmay = 1.f / (3.f + level);
     getParam("sigmay", sigmay, argc, argv);
     cout << "sigmay: " << sigmay << endl;
 
@@ -317,7 +353,7 @@ int main(int argc, char **argv)
     cout << "sigmap: " << sigmap << endl;
 
     // load the input image as grayscale if "-gray" is specifed
-    float lambda = 1.f;
+    float lambda = 0.1f;
     getParam("lambda", lambda, argc, argv);
     cout << "lambda: " << lambda << endl;
 
@@ -370,6 +406,9 @@ int main(int argc, char **argv)
     // allocate raw input image array
     float* h_imgIn  = new float[(size_t)dim];
     float* h_imgOut = new float[(size_t)dim];
+    float* h_x1 = new float[(size_t)size];
+    float* h_x2 = new float[(size_t)size];
+    float* h_x3 = new float[(size_t)size];
 
     // allocate raw input image for GPU
     float* d_imgInOut; cudaMalloc(&d_imgInOut, nbyted); CUDA_CHECK;
@@ -436,14 +475,52 @@ int main(int argc, char **argv)
     Timer timer; timer.start();
 
     int K;
+    float sum = 0.f;
+    float tmp = 0.f;
 
     init <<<grid_iso, block_iso>>> (d_xbar, d_xcur, d_x, d_y1, d_y2, d_y3, d_p1, d_p2, d_lambda1, d_lambda2, d_lambda1bar, d_lambda2bar, d_lambda1cur, d_lambda2cur, d_imgInOut, w, h, level, proj);
 
     for (int i = 1; i <= repeats; i++)
     {
-        cout << "Step: " << i << endl;
+        // cout << "Step: " << i << endl;
+        
+        // DONE
         parabola <<<grid, block>>> (d_y1, d_y2, d_y3, d_lambda1, d_lambda2, d_xbar, d_imgInOut, sigmay, lambda, w, h, level);
+        
+        // DUAL ENERGY
+        cudaMemcpy(h_x1, d_y1, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+        cudaMemcpy(h_x2, d_y2, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+        cudaMemcpy(h_x3, d_y3, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+
+        sum = 0.f;
+        for (int kx = 0; kx < level; kx++)
+        {
+            for (int ix = 0; ix < h; ix++)
+            {
+                for (int jx = 0; jx < w; jx++)
+                {
+                    float x1 = h_x1[jx + w * ix + w * h * kx] - (jx>0 ? h_x1[(jx-1) + w * ix + w * h * kx] : 0.f);
+                    float x2 = h_x2[jx + w * ix + w * h * kx] - (ix>0 ? h_x2[jx + w * (ix-1) + w * h * kx] : 0.f);
+                    float x3 = h_x3[jx + w * ix + w * h * kx] - (kx>0 ? h_x3[jx + w * ix + w * h * (kx-1)] : 0.f);
+                    float d = x1+x2+x3;
+                    if (d > 0) {
+                        sum += 1.f;
+                    }
+                }
+            }
+        }
+        printf("%d %f\n", i, sqrtf(sum));
+        if (i%20 == 0) {
+            if (abs(sqrtf(tmp) - sqrtf(sum)) < 1E-6) {
+                break;
+            }
+            tmp = sum;
+        }
+        // END DUAL ENERGY
+
+        // DONE
         l2projection <<<grid_iso, block_iso>>> (d_p1, d_p2, d_lambda1bar, d_lambda2bar, sigmap, nu, w, h, level);
+        
         K = 0;
         for (int k1 = 0; k1 < level; k1++)
         {
@@ -454,9 +531,15 @@ int main(int argc, char **argv)
                 K++;
             }
         }
+
+        // DONE
         clipping <<<grid, block>>> (d_x, d_xcur, d_y1, d_y2, d_y3, taux, w, h, level);
-        extrapolate <<<grid, block>>> (d_xbar, d_lambda1bar, d_lambda2bar, d_xcur, d_lambda1cur, d_lambda2cur, d_x, d_lambda1, d_lambda2, w, h, level, proj);
+        
+        // DONE
+        extrapolate <<<grid_iso, block_iso>>> (d_xbar, d_lambda1bar, d_lambda2bar, d_xcur, d_lambda1cur, d_lambda2cur, d_x, d_lambda1, d_lambda2, w, h, level);
     }
+
+    // DONE
     isosurface <<<grid_iso, block_iso>>> (d_imgInOut, d_x, w, h, level);
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
@@ -501,16 +584,19 @@ int main(int argc, char **argv)
     }
 #else
     // wait for key inputs
-    cv::waitKey(0);
+    // cv::waitKey(0);
 #endif
 
     // save input and result
-    cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
-    cv::imwrite("image_result.png",mOut*255.f);
+    // cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
+    cv::imwrite(output, mOut*255.f);
 
     // free allocated arrays
     delete[] h_imgIn;
     delete[] h_imgOut;
+    delete[] h_x1;
+    delete[] h_x2;
+    delete[] h_x3;
     // close all opencv windows
     cvDestroyAllWindows();
     return 0;

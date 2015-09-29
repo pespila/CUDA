@@ -1,0 +1,10 @@
+# Scale font and line width (dpi) by changing the size! It will always display stretched.
+set terminal png
+set output '../results/synth/dual_energy_dykstra.png'
+
+# Key means label...
+set key inside bottom right
+set xlabel 'Iterations (i)'
+set ylabel 'Dual Energy'
+set title 'Plot of Dual Energy'
+plot  "../results/synth/data_dykstra.txt" using 1:2 title 'Energy' with lines
