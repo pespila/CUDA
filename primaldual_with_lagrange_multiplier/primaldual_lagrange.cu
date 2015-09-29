@@ -588,7 +588,7 @@ int main(int argc, char **argv)
 #endif
 
     // save input and result
-    // cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
+    cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
     cv::imwrite(output, mOut*255.f);
 
     // free allocated arrays
