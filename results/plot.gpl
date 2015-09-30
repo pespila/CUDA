@@ -1,10 +1,12 @@
 # Scale font and line width (dpi) by changing the size! It will always display stretched.
 set terminal png
-set output '../results/inpaint/dual_energy_lagrange.png'
+if (!exists("outfile")) outfile='dualenergy.png'
+set output outfile
 
 # Key means label...
 set key inside bottom right
 set xlabel 'Iterations (i)'
 set ylabel 'Dual Energy'
 set title 'Plot of Dual Energy'
-plot  "../results/inpaint/data_lagrange.txt" using 1:2 title 'Energy' with lines
+if (!exists("datafile")) datafile='data.txt'
+plot datafile using 1:2 title 'Energy' with lines

@@ -124,7 +124,7 @@ __global__ void init(float* xbar, float* xcur, float* xn, float* y1, float* y2, 
     }
 }
 
-__global__ void parabola(float* y1, float* y2, float* y3, float* l1, float* l2, float* xbar, float* img, float sigma, float lambda, int w, int h, int l)
+__global__ void parabola(float* y1, float* y2, float* y3, float* energy, float* l1, float* l2, float* xbar, float* img, float sigma, float lambda, int w, int h, int l, int rep)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -168,6 +168,14 @@ __global__ void parabola(float* y1, float* y2, float* y3, float* l1, float* l2, 
             y1[i] = x1;
             y2[i] = x2;
             y3[i] = x3;
+        }
+
+        x1 = y1[i] - (x>0 ? y1[(x-1) + w * y + w * h * z] : 0.f);
+        x2 = y2[i] - (y>0 ? y2[x + w * (y-1) + w * h * z] : 0.f);
+        x3 = y3[i] - (z>0 ? y3[x + w * y + w * h * (z-1)] : 0.f);
+        float d = x1+x2+x3;
+        if (d > 0) {
+            energy[rep]++;
         }
     }
 }
@@ -247,6 +255,30 @@ __global__ void update_lambda(float* l1, float* l2, float* l1cur, float* l2cur, 
         l2[i] = l2cur[i] - tau * (p2[i] - y2tmp);
     }
 }
+
+// __global__ void extrapolate(float* xbar, float* l1bar, float* l2bar, float* xcur, float* l1cur, float* l2cur, float* xn, float* l1, float* l2, int w, int h, int l, int p)
+// {
+//     int x = threadIdx.x + blockDim.x * blockIdx.x;
+//     int y = threadIdx.y + blockDim.y * blockIdx.y;
+//     int z = threadIdx.z + blockDim.z * blockIdx.z;
+    
+//     if (x < w && y < h && z < l) {
+//         int i = x + w * y + w * h * z;
+//         int j;
+
+//         xbar[i] = 2.f * xn[i] - xcur[i];
+//         xcur[i] = xn[i];
+        
+//         for (int k = 0; k < p; k++)
+//         {
+//             j = x + w * y + w * h * k;
+//             l1bar[j] = 2.f * l1[j] - l1cur[j];
+//             l1cur[j] = l1[j];
+//             l2bar[j] = 2.f * l2[j] - l2cur[j];
+//             l2cur[j] = l2[j];
+//         }
+//     }
+// }
 
 __global__ void extrapolate(float* xbar, float* l1bar, float* l2bar, float* xcur, float* l1cur, float* l2cur, float* xn, float* l1, float* l2, int w, int h, int l)
 {
@@ -423,6 +455,7 @@ int main(int argc, char **argv)
     int nbyted = dim*sizeof(float);
     int nbytes = size*sizeof(float);
     int nbytep = proj*dim*sizeof(float);
+    int nbyter = repeats*sizeof(float);
 
     cv::Mat mOut(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
 
@@ -436,6 +469,8 @@ int main(int argc, char **argv)
 
     // allocate raw input image for GPU
     float* d_imgInOut; cudaMalloc(&d_imgInOut, nbyted); CUDA_CHECK;
+
+    float* d_energy; cudaMalloc(&d_energy, nbyter); CUDA_CHECK;
 
     float* d_x; cudaMalloc(&d_x, nbytes); CUDA_CHECK;
     float* d_xbar; cudaMalloc(&d_xbar, nbytes); CUDA_CHECK;
@@ -490,55 +525,59 @@ int main(int argc, char **argv)
     // launch kernel
     dim3 block = dim3(32, 8, 4);
     dim3 grid = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, (level + block.z - 1) / block.z);
+    // dim3 block_op = dim3(32, 8, 4);
+    // dim3 grid_op = dim3((w + block.x - 1) / block.x, (h + block.y - 1) / block.y, (proj + block.z - 1) / block.z);
     dim3 block_iso = dim3(32, 8, 1);
     dim3 grid_iso = dim3((w + block_iso.x - 1) / block_iso.x, (h + block_iso.y - 1) / block_iso.y, 1);
 
     Timer timer; timer.start();
 
     int K;
-    float sum = 0.f;
-    float tmp = 0.f;
-    int count = 0;
+    // float sum = 0.f;
+    // float tmp = 0.f;
 
     init <<<grid_iso, block_iso>>> (d_xbar, d_xcur, d_x, d_y1, d_y2, d_y3, d_p1, d_p2, d_lambda1, d_lambda2, d_lambda1bar, d_lambda2bar, d_lambda1cur, d_lambda2cur, d_imgInOut, w, h, level, proj);
 
     for (int i = 1; i <= repeats; i++)
     {
+        // cout << "Step: " << i << endl;
         
-        parabola <<<grid, block>>> (d_y1, d_y2, d_y3, d_lambda1, d_lambda2, d_xbar, d_imgInOut, sigmay, lambda, w, h, level);
+        // DONE
+        parabola <<<grid, block>>> (d_y1, d_y2, d_y3, d_energy, d_lambda1, d_lambda2, d_xbar, d_imgInOut, sigmay, lambda, w, h, level, i-1);
         
         // DUAL ENERGY
-        cudaMemcpy(h_x1, d_y1, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
-        cudaMemcpy(h_x2, d_y2, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
-        cudaMemcpy(h_x3, d_y3, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+        // cudaMemcpy(h_x1, d_y1, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+        // cudaMemcpy(h_x2, d_y2, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+        // cudaMemcpy(h_x3, d_y3, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
 
-        sum = 0.f;
-        for (int kx = 0; kx < level; kx++)
-        {
-            for (int ix = 0; ix < h; ix++)
-            {
-                for (int jx = 0; jx < w; jx++)
-                {
-                    float x1 = h_x1[jx + w * ix + w * h * kx] - (jx>0 ? h_x1[(jx-1) + w * ix + w * h * kx] : 0.f);
-                    float x2 = h_x2[jx + w * ix + w * h * kx] - (ix>0 ? h_x2[jx + w * (ix-1) + w * h * kx] : 0.f);
-                    float x3 = h_x3[jx + w * ix + w * h * kx] - (kx>0 ? h_x3[jx + w * ix + w * h * (kx-1)] : 0.f);
-                    float d = x1+x2+x3;
-                    if (d > 0) {
-                        sum += 1.f;
-                    }
-                }
-            }
-        }
-        if (i%50 == 0) {
-            if (abs(sqrtf(tmp) - sqrtf(sum)) < 1E-6) {
-                break;
-            }
-            tmp = sum;
-        }
-        h_energy[count] = sqrtf(sum);
-        count++;
+        // sum = 0.f;
+        // for (int kx = 0; kx < level; kx++)
+        // {
+        //     for (int ix = 0; ix < h; ix++)
+        //     {
+        //         for (int jx = 0; jx < w; jx++)
+        //         {
+        //             float x1 = h_x1[jx + w * ix + w * h * kx] - (jx>0 ? h_x1[(jx-1) + w * ix + w * h * kx] : 0.f);
+        //             float x2 = h_x2[jx + w * ix + w * h * kx] - (ix>0 ? h_x2[jx + w * (ix-1) + w * h * kx] : 0.f);
+        //             float x3 = h_x3[jx + w * ix + w * h * kx] - (kx>0 ? h_x3[jx + w * ix + w * h * (kx-1)] : 0.f);
+        //             float d = x1+x2+x3;
+        //             if (d > 0) {
+        //                 sum += 1.f;
+        //             }
+        //         }
+        //     }
+        // }
+        // if (i%30 == 0) {
+        //     if (abs(sqrtf(tmp) - sqrtf(sum)) < 1E-6) {
+        //         break;
+        //     }
+        //     tmp = sum;
+        // }
+        // h_energy[i-1] = sqrtf(sum);
+        // energy_size++;
         // END DUAL ENERGY
 
+        // DONE
         l2projection <<<grid_iso, block_iso>>> (d_p1, d_p2, d_lambda1bar, d_lambda2bar, sigmap, nu, w, h, level);
         
         K = 0;
@@ -552,21 +591,27 @@ int main(int argc, char **argv)
             }
         }
 
+        // DONE
         clipping <<<grid, block>>> (d_x, d_xcur, d_y1, d_y2, d_y3, taux, w, h, level);
         
+        // DONE
         extrapolate <<<grid_iso, block_iso>>> (d_xbar, d_lambda1bar, d_lambda2bar, d_xcur, d_lambda1cur, d_lambda2cur, d_x, d_lambda1, d_lambda2, w, h, level);
     }
 
+    // DONE
     isosurface <<<grid_iso, block_iso>>> (d_imgInOut, d_x, w, h, level);
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
 
     cudaMemcpy(h_imgOut, d_imgInOut, nbyted, cudaMemcpyDeviceToHost); CUDA_CHECK;
-    dualEnergy(data, h_energy, count);
+    cudaMemcpy(h_energy, d_energy, nbyter, cudaMemcpyDeviceToHost); CUDA_CHECK;
+    dualEnergy(data, h_energy, repeats);
     parameter(parm, repeats, gray, level, taux, taul, sigmay, sigmap, lambda, nu, w, h, available, total, t);
 
     // free GPU memory
     cudaFree(d_imgInOut); CUDA_CHECK;
+
+    cudaFree(d_energy); CUDA_CHECK;
     
     cudaFree(d_x); CUDA_CHECK;
     cudaFree(d_xbar); CUDA_CHECK;
