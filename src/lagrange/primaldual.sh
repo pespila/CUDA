@@ -16,18 +16,19 @@ make
 # -level 32 -repeats 10000 -nu 0.01 -lambda 0.1 > "../results/crack_tip/data.txt"
 # -level 16 -repeats 10000 -nu 0.0001 -lambda 0.1 > "../results/synth/data.txt"
 
+# file="synth_gauss"
+# ./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 16 -repeats 10000 -nu 0.01 -lambda 0.11
+
 nrj="data.txt"
 img="../../img/"
 res="./results/"
-file="synth_gauss"
-par=$res$file"/parameter.txt"
-out=$res$file"/"$file".png"
-./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 16 -repeats 10000 -nu 0.001 -lambda 0.11
-gnuplot -e "outfile='"$out"'" -e "datafile='data.txt'" plot.gpl
+
+for file in "synth" "lena" "hepburn" "ladama" "marylin" "synth_gauss" "crack_tip" "inpaint";
+do
+	par=$res$file"/parameter.txt"
+	out=$res$file"/dual_energy.png"
+	./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 16 -repeats 10000 -nu 0.01 -lambda 0.1
+	gnuplot -e "outfile='"$out"'" -e "datafile='data.txt'" plot.gpl
+done
 rm data.txt
 rm ./primaldual
-
-# for file in "synth" "lena" "hepburn" "ladama" "marylin" "synth_gauss" "crack_tip" "inpaint";
-# do
-# 	.primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 8 -repeats 1000 -nu 0.001 -lambda 0.1
-# done
