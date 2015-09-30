@@ -1,0 +1,120 @@
+% Template created by Robert Maier, 2013
+\documentclass[t,plaincaption]{beamer}
+
+\mode<presentation>
+{
+	\usepackage{theme_cvpr/beamerthemeCVPR}
+	\setbeamercovered{transparent}
+}
+
+\usepackage{verbatim}
+
+% Use xelatex to use TTF fonts 
+\usepackage{fontspec}
+\setsansfont{Arial}
+
+% set the bibliography style
+%\bibliographystyle{abbrv}
+\bibliographystyle{apalike}
+
+% set document information
+\def\titleEn{Title}
+\def\authorName{Author}
+\title[\titleEn]{\titleEn}
+\author[\authorName: \titleEn]{\authorName}
+\date{January 1, 2014}
+
+
+\begin{document}
+
+\frame{
+\titlepage
+}
+
+\frame{
+\frametitle{Outline}
+
+\tableofcontents
+}
+
+
+\section{Introduction}
+\frame{
+\frametitle{Introduction}
+
+\begin{itemize}
+  \item Lorem ipsum dolor sit amet, \cite{dummy2014}
+  \begin{itemize}
+    \item consectetur
+    \item adipisicing
+  \end{itemize}
+  \item elit
+\end{itemize}
+}
+
+
+\section{Related Work}
+\frame{
+\frametitle{Related work}
+
+\begin{columns}
+\column[t]{0.45\linewidth}
+\begin{itemize}
+  \item Lorem ipsum dolor sit amet,
+  \begin{itemize}
+    \item consectetur
+    \item adipisicing
+  \end{itemize}
+  \item elit
+\end{itemize}
+
+\column[t]{0.45\linewidth}
+\begin{itemize}
+  \item Lorem ipsum dolor sit amet,
+  \begin{itemize}
+    \item consectetur
+    \item adipisicing
+  \end{itemize}
+  \item elit
+\end{itemize}
+
+\end{columns}
+}
+
+
+\section{Main Section}
+\frame{
+\frametitle{Main Section}
+
+\begin{itemize}
+  \item Lorem ipsum dolor sit amet,
+  \begin{itemize}
+    \item consectetur
+    \item adipisicing
+  \end{itemize}
+  \item elit
+\end{itemize}
+}
+
+ 
+\section{Conclusion and Future Work}
+\frame{
+\frametitle{Conclusion and Future Work}
+
+\begin{itemize}
+  \item Lorem ipsum dolor sit amet,
+  \begin{itemize}
+    \item consectetur
+    \item adipisicing
+  \end{itemize}
+  \item elit
+\end{itemize}
+}
+
+\frame[allowframebreaks]{
+\frametitle{Bibliography}
+	\tiny
+	\bibliography{bibliography} 
+}
+
+\end{document}

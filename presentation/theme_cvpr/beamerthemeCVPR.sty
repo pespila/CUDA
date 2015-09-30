@@ -1,0 +1,170 @@
+\DeclareOption{plaincaption}{%
+  \def\plaincaptiontrue
+}
+\ProcessOptions*\relax
+
+\mode<presentation>
+
+\useinnertheme[shadow]{rounded}
+\useinnertheme{rectangles}
+
+\setlength{\abovecaptionskip}{-2pt}
+\setlength{\belowcaptionskip}{-8pt}
+
+\newcommand{\headerHeight}{1.0cm}
+\pgfdeclareimage[height=\headerHeight]{tumlogo}{theme_cvpr/tumlogo}
+\pgfdeclareimage[height=\headerHeight]{image}{theme_cvpr/image}
+\pgfdeclareimage[height=\headerHeight,width=\paperwidth]{headerbg}{theme_cvpr/headerbg}
+\pgfdeclareimage[height=\headerHeight]{drawing}{theme_cvpr/drawing}
+
+\institute[TUM]
+{
+  Technische Universit{\"a}t M{\"u}nchen\\
+  Department of Informatics\\
+  Computer Vision Group
+}
+
+\defbeamertemplate*{footline}{TUM theme}
+{%
+  \leavevmode%
+  \begin{beamercolorbox}[center]{author in head/foot}%
+    \begin{beamercolorbox}[wd=0.98\paperwidth,dp=0.1ex,ht=0.1ex]{separation line}%
+    \end{beamercolorbox}%
+  \end{beamercolorbox}
+  \begin{beamercolorbox}[wd=.8\paperwidth,ht=2.5ex,dp=1.125ex,left]{author in head/foot}%
+    \usebeamerfont{author in head/foot}\hspace*{2ex}\insertshortauthor%
+  \end{beamercolorbox}%
+  \begin{beamercolorbox}[wd=.2\paperwidth,ht=2.5ex,dp=1.125ex,right]{date in head/foot}%
+    \usebeamerfont{date in head/foot}\insertframenumber{} / \inserttotalframenumber\hspace*{2ex}%
+  \end{beamercolorbox}%
+}
+
+\definecolor{headerbgColor}{RGB}{0,0,127}
+\setbeamercolor{headerbgBack}{bg=headerbgColor}
+\setbeamercolor{headerbgFore}{fg=white}
+
+\defbeamertemplate*{headline}{TUM theme}
+{%
+  \leavevmode%
+  \begin{beamercolorbox}[wd=\paperwidth,ht=\headerHeight]{}%
+    \pgfuseimage{headerbg}
+  \end{beamercolorbox}
+  \vskip-\headerHeight
+
+\hskip-0.2cm
+  \hbox{%
+  \begin{beamercolorbox}[wd=.5\paperwidth,ht=\headerHeight,left]{}%
+    \pgfuseimage{drawing}
+  \end{beamercolorbox}
+  \hskip-0.5\paperwidth
+  \begin{beamercolorbox}[wd=.5\paperwidth,ht=\headerHeight,left]{}%
+    \pgfuseimage{image}
+  \end{beamercolorbox}
+
+  \begin{beamercolorbox}[wd=.5\paperwidth,ht=\headerHeight,right]{}%
+    \pgfuseimage{tumlogo}\hspace{0.25cm}
+  \end{beamercolorbox}%
+  }
+  \vskip-\headerHeight
+  
+  \begin{beamercolorbox}[wd=\paperwidth,ht=\headerHeight]{headerbgFore}%
+  \vspace{0.3cm}
+  \hspace{1.5cm}
+  {\sffamily\large Computer Vision Group}
+  \end{beamercolorbox}%
+
+}
+
+% increase space before frame title
+\addtobeamertemplate{frametitle}{}{\vspace{-0.2cm}}
+
+% TUM basic colors
+\xdefinecolor{TUM_blue}{RGB}{000,101,189}
+\xdefinecolor{TUM_blue_1}{RGB}{000,051,089}
+\xdefinecolor{TUM_blue_2}{RGB}{000,082,147}
+\xdefinecolor{TUM_blue_3}{RGB}{000,115,207}
+\xdefinecolor{TUM_blue_4}{RGB}{100,160,200} 
+\xdefinecolor{TUM_blue_5}{RGB}{152,198,234}
+\xdefinecolor{TUM_orange}{RGB}{227,114,034}
+\xdefinecolor{TUM_green}{RGB}{162,173,000}
+\xdefinecolor{TUM_ivory}{RGB}{218,215,203}
+
+\xdefinecolor{TUM_gold}{RGB}{255,180,000}
+\xdefinecolor{TUM_darkorange}{RGB}{255,128,000}
+\xdefinecolor{TUM_red}{RGB}{229,052,024}
+\xdefinecolor{TUM_darkred}{RGB}{202,033,063}
+\xdefinecolor{TUM_blueish}{RGB}{000,153,255}
+\xdefinecolor{TUM_lightblueish}{RGB}{065,190,255}
+\xdefinecolor{TUM_greenish}{RGB}{145,172,107}
+\xdefinecolor{TUM_lightgreenish}{RGB}{181,202,130}
+
+\setbeamercolor{normal text}{fg=black,bg=white}
+\setbeamercolor{alerted text}{fg=TUM_orange}
+\setbeamercolor{example text}{fg=TUM_green}
+
+\setbeamercolor{background canvas}{parent=normal text}
+
+\setbeamercolor{structure}{fg=white,bg=TUM_blue}
+
+\setbeamercolor*{palette primary}{use=structure,fg=structure.fg,,bg=TUM_blue_4}
+\setbeamercolor*{palette secondary}{use=structure,fg=structure.fg,bg=TUM_blue_2}
+\setbeamercolor*{palette tertiary}{use=structure,fg=structure.fg,bg=TUM_blue_3}
+\setbeamercolor*{palette quaternary}{use=structure,fg=structure.fg,bg=TUM_blue_5}
+
+\setbeamercolor*{titlelike}{use=structure,fg=structure.bg,bg=structure.fg}
+\setbeamercolor*{title}{use=structure,fg=structure.fg,bg=structure.bg}
+
+\setbeamercolor*{section in toc}{fg=TUM_blue_3}
+\setbeamercolor*{subsection in toc}{fg=TUM_blue_3}
+
+\setbeamercolor{block title}{use=structure,fg=white,bg=structure.bg}
+\setbeamercolor{block title alerted}{use=alerted text,fg=black,bg=alerted text.fg}
+\setbeamercolor{block title example}{use=example text,fg=black,bg=example text.fg}
+
+\setbeamercolor{block body}{parent=normal text,use=block title,bg=TUM_blue_5!30!bg}
+\setbeamercolor{block body alerted}{parent=normal text,use=block title alerted,bg=block title alerted.bg!30!bg}
+\setbeamercolor{block body example}{parent=normal text,use=block title example,bg=block title example.bg!30!bg}
+
+\setbeamercolor{item}{use=structure,bg=structure.fg,fg=structure.bg}
+
+\setbeamercolor{caption}{parent=normal text,fg=TUM_blue}
+
+\setbeamercolor{logo in head/foot}{use=structure,fg=TUM_blue_2,bg=white}
+\setbeamercolor{author in head/foot}{use=structure,fg=TUM_blue_2,bg=white}
+\setbeamercolor{date in head/foot}{use=structure,fg=TUM_blue_2,bg=white}
+\setbeamercolor{separation line}{use=structure,fg=white,bg=TUM_blue}
+
+\setbeamercolor{bibliography entry}{fg=black}
+\setbeamercolor{bibliography entry author}{fg=black}
+\setbeamercolor{bibliography entry title}{fg=TUM_blue}
+\setbeamercolor{bibliography entry journal}{fg=black}
+\setbeamercolor{bibliography entry note}{fg=black!75!bg}
+\setbeamercolor{bibliography entry article}{fg=black}
+\setbeamercolor{bibliography entry book}{fg=black}
+\setbeamercolor{bibliography entry location}{fg=black}
+
+\setbeamerfont{bibliography entry author}{size=\tiny}
+\setbeamerfont{bibliography entry title}{size=\tiny}
+\setbeamerfont{bibliography entry journal}{size=\tiny}
+\setbeamerfont{bibliography entry note}{size=\tiny}
+\setbeamertemplate{bibliography item}[text]
+
+\setbeamertemplate{navigation symbols}{}
+
+
+\AtBeginSection[]
+{
+\setcounter{tocdepth}{2}
+  \begin{frame}
+    \frametitle{Outline}
+    \tableofcontents[currentsection]
+  \end{frame}
+}
+
+\ifdefined\plaincaptiontrue
+\setbeamertemplate{caption}{\emph{\footnotesize{\insertcaption}}}
+\else
+\setbeamertemplate{caption}{\emph{\footnotesize{\insertcaptionname~\insertcaptionnumber:~\insertcaption}}}
+\fi
+
+\mode<all>
