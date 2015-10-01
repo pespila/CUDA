@@ -23,11 +23,13 @@ nrj="data.txt"
 img="../../img/"
 res="./results/"
 
-for file in "synth" "lena" "hepburn" "ladama" "marylin" "synth_gauss" "crack_tip" "inpaint";
+# for file in "synth" "lena" "lena_noisy" "hepburn" "ladama" "marylin" "synth_gauss" "crack_tip" "inpaint";
+# for file in "hepburnc" "blue" "gaudi" "lake" "landscape" "marble" "squirrel" "van_gogh";
+for file in "synth" "lena" "lena_noisy" "hepburn" "ladama" "marylin" "synth_gauss" "crack_tip" "inpaint";
 do
 	par=$res$file"/parameter.txt"
 	out=$res$file"/dual_energy.png"
-	./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 16 -repeats 10000 -nu 0.01 -lambda 0.1
+	./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 16 -repeats 1000 -nu 0.01 -lambda 0.1 -gray
 	gnuplot -e "outfile='"$out"'" -e "datafile='data.txt'" plot.gpl
 done
 rm data.txt

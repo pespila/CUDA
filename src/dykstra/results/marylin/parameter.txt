@@ -1,10 +1,10 @@
 image: 127 x 127
-repeats: 100
+repeats: 1000
 gray: 1
-level: 4
+level: 16
 taux: 0.288675
 sigmap: 0.288675
 lambda: 0.110000
 nu: 0.010000
-GPU Memory: 2146762752 - 1592852480 = 0.553910 GB
-time: 0.943452 s
+GPU Memory: 2146762752 - 830226432 = 1.316536 GB
+time: 4645.008301 s

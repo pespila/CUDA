@@ -1,0 +1,12 @@
+image: 350 x 263 x 3
+repeats: 400
+gray: 0
+level: 8
+taux: 0.166667
+taul: 0.500000
+sigmay: 0.090909
+sigmap: 1.000000
+lambda: 0.110000
+nu: 0.001250
+GPU Memory: 2146762752 - 1124208640 = 1.022554 GB
+time: 15.777977 s
