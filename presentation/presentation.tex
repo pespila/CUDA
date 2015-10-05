@@ -63,18 +63,21 @@
 
 \section{Related Work}
     \frame{
-        \frametitle{Related work}
+        \frametitle{Related work and furhter References}
 
 
         \begin{itemize}
             \item T. Pock and D. Cremers and H. Bischof and A. Chambolle,\\
             An Algorithm for Minimizing the Piecewise Smooth Mumford-Shah Functional, ICCV, 2009.
+            \item https://www.github.com/BauerMichael
+            \item http://www.mik-e.com
+            \item Tuesday, 20th October, 10 am, Department of Mathematics, University of Regensburg
         \end{itemize}
 
     }
 
 
-\section{The Primal-Dual Algorithm}
+\section{Primal-Dual Algorithm}
 
     % \frame{
     %     \frametitle{Discrete Setting}
@@ -116,7 +119,7 @@
 
             \begin{algorithm}[Clipping]
                 \begin{equation}
-                    x^{n+1} = \min\{ 0, \max\{ 0, x^{n} \} \}. \notag
+                    x^{n+1} = \min\{ 1, \max\{ 0, x^{n} \} \}. \notag
                 \end{equation}
             \end{algorithm}
     }
@@ -156,7 +159,7 @@
                               x^{n+1} = \Pi_{C} (x^{n} - \tau_{x} A^{*} y^{n+1}) \\
                               \lambda_{k_{1}, k_{2}}^{n+1} = \lambda_{k_{1}, k_{2}}^{n} - \tau_{\lambda} (p_{k_{1}, k_{2}}^{n+1} - \sum_{k_{1} \le k \le k_{2}} (y_{1}(i, j, k), y_{2}(i, j, k))^{T}) \\
                               \bar{x}^{n+1} = 2x^{n+1} - x^{n} \\
-                              \bar{\lambda}_{k_{1}, k_{2}}^{n+1} = 2\lambda_{k_{1}, k_{2}}^{n+1} - \lambda_{k_{1}, k_{2}}^{n}.
+                              \bar{\lambda}_{k_{1}, k_{2}}^{n+1} = 2\lambda_{k_{1}, k_{2}}^{n+1} - \lambda_{k_{1}, k_{2}}^{n}. \notag
                             \end{array}
                         \right.
                     \end{equation}
