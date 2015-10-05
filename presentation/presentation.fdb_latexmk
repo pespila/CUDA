@@ -1,14 +1,14 @@
 # Fdb version 3
-["bibtex presentation"] 1444021414 "presentation.aux" "presentation.bbl" "presentation" 1444028926
+["bibtex presentation"] 1444021414 "presentation.aux" "presentation.bbl" "presentation" 1444029306
   "/usr/local/texlive/2015/texmf-dist/bibtex/bst/base/abbrv.bst" 1292289607 20329 b5fed53e10044d0f8112183785c759b1 ""
   "/usr/local/texlive/2015/texmf-dist/bibtex/bst/base/apalike.bst" 1292289607 24635 604dafcc79f521a11ea73e506e1fbd98 ""
   "bibliography.bib" 1443959515 1861 97bf696f29856d21caf817cb4bb22d30 ""
-  "presentation.aux" 1444028925 4356 3e1d234806edda71797438e78f35ffb4 ""
+  "presentation.aux" 1444029306 4356 3e1d234806edda71797438e78f35ffb4 ""
   "presentation.bcf" 0 -1 0 ""
   (generated)
   "presentation.blg"
   "presentation.bbl"
-["pdflatex"] 1444028924 "presentation.tex" "presentation.pdf" "presentation" 1444028926
+["pdflatex"] 1444029304 "presentation.tex" "presentation.pdf" "presentation" 1444029306
   "./theme_cvpr/beamerthemeCVPR.sty" 1443966146 6009 10402464578991c7a739f78ba0494594 ""
   "/usr/local/texlive/2015/texmf-dist/tex/context/base/supp-pdf.mkii" 1337017135 71627 94eb9990bed73c364d7f53f960cc8c5b ""
   "/usr/local/texlive/2015/texmf-dist/tex/generic/ifxetex/ifxetex.sty" 1284331290 1458 43ab4710dc82f3edeabecd0d099626b2 ""
@@ -147,12 +147,12 @@
   "/usr/local/texlive/2015/texmf-dist/tex/latex/tools/enumerate.sty" 1428932888 3467 e23880ed1af32024be116b861a72d6e1 ""
   "/usr/local/texlive/2015/texmf-dist/tex/latex/url/url.sty" 1388531844 12796 8edb7d69a20b857904dd0ea757c14ec9 ""
   "/usr/local/texlive/2015/texmf-dist/tex/latex/xcolor/xcolor.sty" 1169481954 55224 a43bab84e0ac5e6efcaf9a98bde73a94 ""
-  "presentation.aux" 1444028925 4356 3e1d234806edda71797438e78f35ffb4 ""
+  "presentation.aux" 1444029306 4356 3e1d234806edda71797438e78f35ffb4 ""
   "presentation.bbl" 1444021414 49 0eba253fc001332e731e8aba3f23127b "bibtex presentation"
-  "presentation.nav" 1444028925 2266 f1f80efde59b5e789dd4403d61350114 ""
-  "presentation.out" 1444028925 142 79a8de91cc3d62baedbcc582ea028b47 ""
-  "presentation.tex" 1444028923 11002 7f4fd7b01ca58b49ac8ed46942e8700f ""
-  "presentation.toc" 1444028925 186 263c1f387fd54ebdb7f96c4f04b937c2 ""
+  "presentation.nav" 1444029306 2266 f1f80efde59b5e789dd4403d61350114 ""
+  "presentation.out" 1444029306 142 79a8de91cc3d62baedbcc582ea028b47 ""
+  "presentation.tex" 1444029299 11002 d26803dd139b0fabe972dd1e9ee06ad7 ""
+  "presentation.toc" 1444029306 186 263c1f387fd54ebdb7f96c4f04b937c2 ""
   "theme_cvpr/inpaint.png" 1443965071 2522 b0e9e7a3e961b9c6243e9d4d8d649227 ""
   "theme_cvpr/inpaintd.png" 1443965071 3993 e10f8e279591c646583ed0d050458c59 ""
   "theme_cvpr/inpaintl.png" 1443966188 3179 8be0c8300b3f55ad3cd577ea8c9d7c41 ""
@@ -167,8 +167,8 @@
   "theme_cvpr/synthl.png" 1443965668 5389 97e168b651c92f4d20351904aab76120 ""
   (generated)
   "presentation.toc"
-  "presentation.aux"
-  "presentation.out"
   "presentation.log"
+  "presentation.out"
+  "presentation.aux"
   "presentation.pdf"
   "presentation.nav"
