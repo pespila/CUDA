@@ -20,46 +20,39 @@
 #include <stdio.h>
 using namespace std;
 
-// uncomment to use the camera
-// #define CAMERA
-
-void parameter(string filename, int repeats, bool gray, int level, float tau, float sigma, float lambda, float nu, int w, int h, size_t available, size_t total, float t) {
+void parameterToFile(string filename,int repeats,bool gray,int level,float tau,float sigma,float lambda,float nu,int w,int h,int nc,size_t available,size_t total,float t,int iter) {
     FILE *file;
     file = fopen(filename.c_str(), "w");
     if(file == NULL)
         printf("ERROR: Could not open file!");
     else {
-        fprintf(file, "image: %d x %d\n", w, h);
+        fprintf(file, "image: %d x %d x %d\n", w, h, nc);
         fprintf(file,"repeats: %d\n", repeats);
         fprintf(file,"gray: %d\n", gray);
         fprintf(file,"level: %d\n", level);
-        fprintf(file,"taux: %f\n", tau);
-        fprintf(file,"sigmap: %f\n", sigma);
+        fprintf(file,"tau: %f\n", tau);
+        fprintf(file,"sigma: %f\n", sigma);
         fprintf(file,"lambda: %f\n", lambda);
         fprintf(file,"nu: %f\n", nu);
         fprintf(file, "GPU Memory: %zd - %zd = %f GB\n", total, available, (total-available)/pow(10,9));
         fprintf(file, "time: %f s\n", t);
+        fprintf(file, "iterations: %d\n", iter);
     }
     fclose (file);
 }
 
-void dualEnergy(string filename, float* energy, int size) {
-    FILE *file;
-    file = fopen(filename.c_str(), "w");
-    if(file == NULL)
-        printf("ERROR: Could not open file!");
-    else {
-        for (int i = 0; i < size; i++)
-        {
-            fprintf(file, "%d %f\n", i, energy[i]);
-        }
-    }
-    fclose (file);
-}
-
-__device__ float l2Norm(float x1, float x2)
-{
-    return sqrtf(x1*x1 + x2*x2);
+void parameterToConsole(string filename,int repeats,bool gray,int level,float tau,float sigma,float lambda,float nu,int w,int h,int nc,size_t available,size_t total,float t,int iter) {
+    printf( "image: %d x %d x %d\n", w, h, nc);
+    printf("repeats: %d\n", repeats);
+    printf("gray: %d\n", gray);
+    printf("level: %d\n", level);
+    printf("tau: %f\n", tau);
+    printf("sigma: %f\n", sigma);
+    printf("lambda: %f\n", lambda);
+    printf("nu: %f\n", nu);
+    printf( "GPU Memory: %zd - %zd = %f GB\n", total, available, (total-available)/pow(10,9));
+    printf( "time: %f s\n", t);
+    printf( "iterations: %d\n", iter);
 }
 
 __device__ float bound(float x1, float x2, float lambda, float k, float l, float f)
@@ -75,7 +68,7 @@ __device__ float interpolate(float k, float uk0, float uk1, float l)
 __device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2, float x3, float f, float L, float lambda, float k, int j, float l)
 {
     float y = x3 + lambda * pow(k / l - f, 2);
-    float norm = l2Norm(x1, x2);
+    float norm = sqrtf(x1*x1+x2*x2);
     float v = 0.f;
     float a = 2.f * 0.25f * norm;
     float b = 2.f / 3.f * (1.f - 2.f * 0.25f * y);
@@ -104,10 +97,6 @@ __global__ void project_on_parabola(float* u1, float* u2, float* u3, float* v1, 
         int i = x + w * y + w * h * z + (k-1) * w * h * l;
         int j = x + w * y + w * h * z + k * w * h * l;
 
-        // float lam = lambda;
-        // if ((x >= 14 && x <= 112) && (y >= 14 && y <= 112)) {
-        //     lam = 0.f;
-        // }
         float f = img[index];
         float x1 = u1[i] - v1[j];
         float x2 = u2[i] - v2[j];
@@ -151,7 +140,7 @@ __global__ void soft_shrinkage(float* u1, float* u2, float* u3, float* v1, float
             s02 += x2;
         }
 
-        float norm = l2Norm(s01, s02);
+        float norm = sqrtf(s01*s01+s02*s02);
 
         s1 = norm <= nu ? s01 : (nu * s01 / norm);
         s2 = norm <= nu ? s02 : (nu * s02 / norm);
@@ -361,13 +350,9 @@ int main(int argc, char **argv)
     cudaDeviceSynchronize();  CUDA_CHECK;
 
     // Reading command line parameters:
-    // getParam("param", var, argc, argv) looks whether "-param xyz" is specified, and if so stores the value "xyz" in "var"
-    // If "-param" is not specified, the value of "var" remains unchanged
-    //
-    // return value: getParam("param", ...) returns true if "-param" is specified, and false otherwise
 
-#ifdef CAMERA
-#else
+    if (argc <= 2) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> [-repeats <repeats>] [-gray]" << endl; return 1; }
+    
     // input image
     string image = "";
     bool ret = getParam("i", image, argc, argv);
@@ -378,32 +363,21 @@ int main(int argc, char **argv)
     string output = "";
     bool retO = getParam("o", output, argc, argv);
     if (!retO) cerr << "ERROR: no output image specified" << endl;
-    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> -data <data.txt> -parm <parameter.txt> [-repeats <repeats>] [-gray]" << endl; return 1; }
-
-    // energy values
-    string data = "";
-    bool ret1 = getParam("data", data, argc, argv);
-    if (!ret1) cerr << "ERROR: no data file specified" << endl;
-    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> -data <data.txt> -parm <parameter.txt> [-repeats <repeats>] [-gray]" << endl; return 1; }
 
     // parameter values
     string parm = "";
     bool ret2 = getParam("parm", parm, argc, argv);
-    if (!ret2) cerr << "ERROR: no parm file specified" << endl;
-    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> -data <data.txt> -parm <parameter.txt> [-repeats <repeats>] [-gray]" << endl; return 1; }
-
-#endif
     
     // number of computation repetitions to get a better run time measurement
-    int repeats = 1;
+    int repeats = 1000;
     getParam("repeats", repeats, argc, argv);
 
     // number of computation repetitions to get a better run time measurement
-    int dykstra = 1;
+    int dykstra = 10;
     getParam("dykstra", dykstra, argc, argv);
     
     // load the input image as grayscale if "-gray" is specifed
-    bool gray = true;
+    bool gray = false;
     getParam("gray", gray, argc, argv);
 
     // load the input image as grayscale if "-gray" is specifed
@@ -428,42 +402,26 @@ int main(int argc, char **argv)
     getParam("lambda", lambda, argc, argv);
 
     // load the input image as grayscale if "-gray" is specifed
-    float nu = 0.001f;
+    float nu = 0.01f;
     getParam("nu", nu, argc, argv);
-
-    // Init camera / Load input image
-#ifdef CAMERA
-
-    // Init camera
-  	cv::VideoCapture camera(0);
-  	if(!camera.isOpened()) { cerr << "ERROR: Could not open camera" << endl; return 1; }
-    int camW = 640;
-    int camH = 480;
-  	camera.set(CV_CAP_PROP_FRAME_WIDTH,camW);
-  	camera.set(CV_CAP_PROP_FRAME_HEIGHT,camH);
-    // read in first frame to get the dimensions
-    cv::Mat mIn;
-    camera >> mIn;
-    
-#else
     
     // Load the input image using opencv (load as grayscale if "gray==true", otherwise as is (may be color or grayscale))
     cv::Mat mIn = cv::imread(image.c_str(), (gray? CV_LOAD_IMAGE_GRAYSCALE : -1));
     // check
     if (mIn.data == NULL) { cerr << "ERROR: Could not load image " << image << endl; return 1; }
-    
-#endif
 
     // convert to float representation (opencv loads image values as single bytes by default)
     mIn.convertTo(mIn,CV_32F);
     // convert range of each channel to [0,1] (opencv default is [0,255])
     mIn /= 255.f;
+
     // get image dimensions
     int w = mIn.cols;         // width
     int h = mIn.rows;         // height
     int nc = mIn.channels();  // number of channels
     int dim = w*h*nc;
     int size = w*h*nc*level;
+    // int projections = level*(level-1)/2 + level + 2;
     int projections = level * (level+1) / 2 + 1 + 1;
     int nbytes = size*sizeof(float);
     int nbyted = dim*sizeof(float);
@@ -471,13 +429,14 @@ int main(int argc, char **argv)
 
     cv::Mat mOut(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
 
+    float nrj = 0.f;
+
     // allocate raw input image array
-    float* h_energy = new float[(size_t)repeats];
+    // allocate raw input image array
+    float* h_u = new float[(size_t)size];
+    float* h_un = new float[(size_t)size];
     float* h_imgIn  = new float[(size_t)dim];
     float* h_imgOut = new float[(size_t)dim];
-    float* h_x1 = new float[(size_t)size];
-    float* h_x2 = new float[(size_t)size];
-    float* h_x3 = new float[(size_t)size];
 
     // allocate raw input image for GPU
     float* d_imgInOut; cudaMalloc(&d_imgInOut, nbyted); CUDA_CHECK;
@@ -542,13 +501,11 @@ int main(int argc, char **argv)
     Timer timer; timer.start();
 
     int count_p = projections;
-    float sum = 0.f;
-    float tmp = 0.f;
-    int count = 0;
+    int iter;
 
     init <<<grid_iso, block_iso>>> (d_xbar, d_xcur, d_x, d_y1, d_y2, d_y3, d_imgInOut, w, h, level);
 
-    for (int i = 1; i <= repeats; i++)
+    for (iter = 0; iter < repeats; iter++)
     {        
         gradient <<<grid, block>>> (d_delX, d_delY, d_delZ, d_y1, d_y2, d_y3, d_xbar, sigma, w, h, level);
         set_u_v <<<grid, block>>> (d_u1, d_u2, d_u3, d_v1, d_v2, d_v3, d_delX, d_delY, d_delZ, w, h, level, projections);
@@ -570,40 +527,16 @@ int main(int argc, char **argv)
                 }
             }
         }
-        
         set_y <<<grid, block>>> (d_y1, d_y2, d_y3, d_u1, d_u2, d_u3, w, h, level, projections);
-        // DUAL ENERGY
-        cudaMemcpy(h_x1, d_y1, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
-        cudaMemcpy(h_x2, d_y2, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
-        cudaMemcpy(h_x3, d_y3, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
-
-        sum = 0.f;
-        for (int kx = 0; kx < level; kx++)
-        {
-            for (int ix = 0; ix < h; ix++)
-            {
-                for (int jx = 0; jx < w; jx++)
-                {
-                    float x1 = h_x1[jx + w * ix + w * h * kx] - (jx>0 ? h_x1[(jx-1) + w * ix + w * h * kx] : 0.f);
-                    float x2 = h_x2[jx + w * ix + w * h * kx] - (ix>0 ? h_x2[jx + w * (ix-1) + w * h * kx] : 0.f);
-                    float x3 = h_x3[jx + w * ix + w * h * kx] - (kx>0 ? h_x3[jx + w * ix + w * h * (kx-1)] : 0.f);
-                    float d = x1+x2+x3;
-                    if (d > 0) {
-                        sum += 1.f;
-                    }
-                }
-            }
-        }
-        if (i%50 == 0) {
-            if (abs(sqrtf(tmp) - sqrtf(sum)) < 1E-6) {
-                break;
-            }
-            tmp = sum;
-        }
-        h_energy[count] = sqrtf(sum);
-        count++;
-        // END DUAL ENERGY
         clipping <<<grid, block>>> (d_x, d_xcur, d_y1, d_y2, d_y3, tau, w, h, level);
+        cudaMemcpy(h_u, d_x, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+        cudaMemcpy(h_un, d_xcur, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+        nrj = 0.f;
+        for (int i = 0; i < size; i++)
+        {
+            nrj += fabs(h_u[i] - h_un[i]);
+        }
+        if (nrj/(w*h*level) <= 5*1E-5) break;
         extrapolate <<<grid, block>>> (d_xbar, d_xcur, d_x, w, h, level);
     }
     isosurface <<<grid_iso, block_iso>>> (d_imgInOut, d_x, w, h, level);
@@ -611,8 +544,12 @@ int main(int argc, char **argv)
     timer.end();  float t = timer.get();  // elapsed time in seconds
 
     cudaMemcpy(h_imgOut, d_imgInOut, nbyted, cudaMemcpyDeviceToHost); CUDA_CHECK;
-    dualEnergy(data, h_energy, count);
-    parameter(parm, repeats, gray, level, tau, sigma, lambda, nu, w, h, available, total, t);
+    // dualEnergy(data, h_energy, count);
+    if (!ret2) {
+        parameterToConsole(parm,repeats,gray,level,tau,sigma,lambda,nu,w,h,nc,available,total,t,iter);
+    } else {
+        parameterToFile(parm,repeats,gray,level,tau,sigma,lambda,nu,w,h,nc,available,total,t,iter);
+    }
 
     // free GPU memory
     cudaFree(d_imgInOut); CUDA_CHECK;
@@ -660,12 +597,10 @@ int main(int argc, char **argv)
     cv::imwrite(output, mOut*255.f);
 
     // free allocated arrays
+    delete[] h_u;
+    delete[] h_un;
     delete[] h_imgIn;
     delete[] h_imgOut;
-    delete[] h_energy;
-    delete[] h_x1;
-    delete[] h_x2;
-    delete[] h_x3;
     // close all opencv windows
     cvDestroyAllWindows();
     return 0;

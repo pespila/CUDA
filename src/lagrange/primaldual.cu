@@ -20,10 +20,7 @@
 #include <stdio.h>
 using namespace std;
 
-// uncomment to use the camera
-// #define CAMERA
-
-void parameter(string filename, int repeats, bool gray, int level, float taux, float taul, float sigmay, float sigmap, float lambda, float nu, int w, int h, int nc, size_t available, size_t total, float t) {
+void parameterToFile(string filename,int repeats,bool gray,int level,float tauu,float taum,float sigmap,float sigmas,float lambda,float nu,int w,int h,int nc,size_t available,size_t total,float t,int iter) {
     FILE *file;
     file = fopen(filename.c_str(), "w");
     if(file == NULL)
@@ -33,35 +30,38 @@ void parameter(string filename, int repeats, bool gray, int level, float taux, f
         fprintf(file,"repeats: %d\n", repeats);
         fprintf(file,"gray: %d\n", gray);
         fprintf(file,"level: %d\n", level);
-        fprintf(file,"taux: %f\n", taux);
-        fprintf(file,"taul: %f\n", taul);
-        fprintf(file,"sigmay: %f\n", sigmay);
-        fprintf(file,"sigmap: %f\n", sigmap);
+        fprintf(file,"tauu: %f\n", tauu);
+        fprintf(file,"taum: %f\n", taum);
+        fprintf(file,"sigmas: %f\n", sigmas);
         fprintf(file,"lambda: %f\n", lambda);
         fprintf(file,"nu: %f\n", nu);
         fprintf(file, "GPU Memory: %zd - %zd = %f GB\n", total, available, (total-available)/pow(10,9));
         fprintf(file, "time: %f s\n", t);
+        fprintf(file, "iterations: %d\n", iter);
     }
     fclose (file);
 }
 
-void dualEnergy(string filename, float* energy, int size) {
-    FILE *file;
-    file = fopen(filename.c_str(), "w");
-    if(file == NULL)
-        printf("ERROR: Could not open file!");
-    else {
-        for (int i = 0; i < size; i++)
-        {
-            fprintf(file, "%d %f\n", i, energy[i]);
-        }
-    }
-    fclose (file);
+void parameterToConsole(string filename,int repeats,bool gray,int level,float tauu,float taum,float sigmap,float sigmas,float lambda,float nu,int w,int h,int nc,size_t available,size_t total,float t,int iter) {
+    printf( "image: %d x %d x %d\n", w, h, nc);
+    printf("repeats: %d\n", repeats);
+    printf("gray: %d\n", gray);
+    printf("level: %d\n", level);
+    printf("tauu: %f\n", tauu);
+    printf("taum: %f\n", taum);
+    printf("sigmas: %f\n", sigmas);
+    printf("lambda: %f\n", lambda);
+    printf("nu: %f\n", nu);
+    printf( "GPU Memory: %zd - %zd = %f GB\n", total, available, (total-available)/pow(10,9));
+    printf( "time: %f s\n", t);
+    printf( "iterations: %d\n", iter);
 }
 
-__device__ float l2Norm(float x1, float x2)
-{
-    return sqrtf(x1*x1 + x2*x2);
+float energy(float* u, float* un, int size) {
+    float nrj = 0.f;
+    for (int i = 0; i < size; i++)
+        nrj += fabs(u[i] - un[i]);
+    return nrj;
 }
 
 __device__ float bound(float x1, float x2, float lambda, float k, float l, float f)
@@ -74,10 +74,10 @@ __device__ float interpolate(float k, float uk0, float uk1, float l)
     return (k + (0.5 - uk0) / (uk1 - uk0)) / l;
 }
 
-__device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2, float x3, float f, float L, float lambda, float k, int j, float l)
+__device__ void on_parabola(float* u1,float* u2,float* u3,float x1,float x2,float x3,float f,float lambda,float k,int j,float l)
 {
     float y = x3 + lambda * pow(k / l - f, 2);
-    float norm = l2Norm(x1, x2);
+    float norm = sqrtf(x1*x1+x2*x2);
     float v = 0.f;
     float a = 2.f * 0.25f * norm;
     float b = 2.f / 3.f * (1.f - 2.f * 0.25f * y);
@@ -93,42 +93,42 @@ __device__ void on_parabola(float* u1, float* u2, float* u3, float x1, float x2,
     u3[j] = bound(u1[j], u2[j], lambda, k, l, f);
 }
 
-__global__ void init(float* xbar, float* xcur, float* xn, float* y1, float* y2, float* y3, float* p1, float* p2, float* l1, float* l2, float* l1bar, float* l2bar, float* l1cur, float* l2cur, float* img, int w, int h, int l, int p, int nc)
+__global__ void init(float* u,float* ubar,float* p1,float* p2,float* p3,float* s1,float* s2,float* mu1,float* mu2,float* mubar1,float* mubar2,float* f,int h,int w,int l,int proj,int nc)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     
     if (x < w && y < h)
     {
+        int I, J;
+        float img;
+
         for (int c = 0; c < nc; c++)
         {
-            float img_val = img[x + w * y + w * h * c];
-            for (int k = 0; k < p; k++)
+            img = f[x+y*w+c*h*w]; // image value
+            for (int k = 0; k < proj; k++)
             {
-                int indexP = x + w * y + k * w * h + p * w * h * c;
-                int indexL = x + w * y + k * w * h + l * w * h * c;
-                if (k < l) {
-                    xn[indexL] = img_val;
-                    xcur[indexL] = img_val;
-                    xbar[indexL] = img_val;
-                    y1[indexL] = 0.f;
-                    y2[indexL] = 0.f;
-                    y3[indexL] = 0.f;
+                I = x+y*w+k*h*w+c*h*w*l; // index for u, ubar, p1, p2, p3
+                J = x+y*w+k*h*w+c*h*w*proj; // index for s1, s2, mu1, mu2, mubar1, mubar2
+                if (k<l) {
+                    u[I] = img;
+                    ubar[I] = img;
+                    p1[I] = 0.f;
+                    p2[I] = 0.f;
+                    p3[I] = 0.f;
                 }
-                p1[indexP] = 0.f;
-                p2[indexP] = 0.f;
-                l1[indexP] = 0.f;
-                l2[indexP] = 0.f;
-                l1cur[indexP] = 0.f;
-                l2cur[indexP] = 0.f;
-                l1bar[indexP] = 0.f;
-                l2bar[indexP] = 0.f;
+                s1[J] = 0.f;
+                s2[J] = 0.f;
+                mu1[J] = 0.f;
+                mu2[J] = 0.f;
+                mubar1[J] = 0.f;
+                mubar2[J] = 0.f;
             }
         }
     }
 }
 
-__global__ void parabola(float* y1, float* y2, float* y3, float* l1, float* l2, float* xbar, float* img, float sigma, float lambda, int w, int h, int l, int nc)
+__global__ void parabola(float* p1,float* p2,float* p3,float* mu1,float* mu2,float* ubar,float* f,float sigma,float lambda,int w,int h,int l,int proj,int nc)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -138,17 +138,19 @@ __global__ void parabola(float* y1, float* y2, float* y3, float* l1, float* l2, 
     {
         for (int c = 0; c < nc; c++)
         {
-            int j = x + w * y + w * h * c;
-            int i = x + w * y + w * h * z + w * h * l * c;
+            int I = x+y*w+c*h*w; // index for image
+            int J = x+y*w+z*h*w+c*h*w*l; // index for
 
-            float f = img[j];
-            float l1sum = 0.f;
-            float l2sum = 0.f;
+            float B;
             
-            float val = xbar[i];
-            float x1 = (x+1<w) ? (xbar[(x+1) + w * y + w * h * z + w * h * l * c] - val) : 0.f;
-            float x2 = (y+1<h) ? (xbar[x + w * (y+1) + w * h * z + w * h * l * c] - val) : 0.f;
-            float x3 = (z+1<l) ? (xbar[x + w * y + w * h * (z+1) + w * h * l * c] - val) : 0.f;
+            float img = f[I];
+            float mu1sum = 0.f;
+            float mu2sum = 0.f;
+
+            float val = ubar[J];
+            float u1 = (y+1<h) ? (ubar[x+(y+1)*w+z*h*w+c*h*w*l]-val) : 0.f;
+            float u2 = (x+1<w) ? (ubar[(x+1)+y*w+z*h*w+c*h*w*l]-val) : 0.f;
+            float u3 = (z+1<l) ? (ubar[x+y*w+(z+1)*h*w+c*h*w*l]-val) : 0.f;
 
             int K = 0;
             for (int k1 = 0; k1 < l; k1++)
@@ -156,64 +158,55 @@ __global__ void parabola(float* y1, float* y2, float* y3, float* l1, float* l2, 
                 for (int k2 = k1; k2 < l; k2++)
                 {
                     if (z <= k2 && z >= k1) {
-                        l1sum += l1[x + w * y + w * h * K + w * h * l * c];
-                        l2sum += l2[x + w * y + w * h * K + w * h * l * c];
+                        mu1sum+=mu1[x+y*w+K*h*w+c*h*w*proj];
+                        mu2sum+=mu2[x+y*w+K*h*w+c*h*w*proj];
                     }
                     K++;
                 }
             }
 
-            x1 = y1[i] + sigma * (x1 - l1sum);
-            x2 = y2[i] + sigma * (x2 - l2sum);
-            x3 = y3[i] + sigma * x3;
+            u1 = p1[J]+sigma*(u1+mu1sum);
+            u2 = p2[J]+sigma*(u2+mu2sum);
+            u3 = p3[J]+sigma*u3;
 
-            float bound_val = bound(x1, x2, lambda, (z+1.f), l, f);
-            if (x3 < bound_val) {
-                on_parabola(y1, y2, y3, x1, x2, x3, f, 0.f, lambda, (z+1.f), i, l);
+            B = bound(u1,u2,lambda,z+1,l,img);
+            if (u3 < B) {
+                on_parabola(p1,p2,p3,u1,u2,u3,img,lambda,z+1,J,l);
             } else {
-                y1[i] = x1;
-                y2[i] = x2;
-                y3[i] = x3;
+                p1[J] = u1;
+                p2[J] = u2;
+                p3[J] = u3;
             }
         }
     }
 }
 
-__global__ void l2projection(float* p1, float* p2, float* l1bar, float* l2bar, float sigma, float nu, int w, int h, int l, int nc)
+__global__ void l2projection(float* s1,float* s2,float* mubar1,float* mubar2,float sigma,float nu,int w,int h,int l,int proj,int nc)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     
     if (x < w && y < h)
     {
+        float m1, m2;
+        float norm;
+        int I;
         for (int c = 0; c < nc; c++)
         {
-            float x1;
-            float x2;
-            float norm;
-            int i;
-            int K = 0;
-            int P = l * (l-1) / 2;
-            for (int k1 = 0; k1 < l; k1++)
+            for (int k = 0; k < proj; k++)
             {
-                for (int k2 = k1; k2 < l; k2++)
-                {
-                    i = x + w * y + w * h * K + w * h * P * c;
-                    x1 = p1[i] + sigma * l1bar[i];
-                    x2 = p2[i] + sigma * l2bar[i];
-
-                    norm = l2Norm(x1, x2);
-                    
-                    p1[i] = (norm <= nu) ? x1 : nu * x1/norm;
-                    p2[i] = (norm <= nu) ? x2 : nu * x2/norm;
-                    K++;
-                }
+                I = x+y*w+k*h*w+c*h*w*proj;
+                m1=s1[I]-sigma*mubar1[I];
+                m2=s2[I]-sigma*mubar2[I];
+                norm=sqrtf(m1*m1+m2*m2);
+                s1[I]=(norm<=nu) ? m1 : nu*m1/norm;
+                s2[I]=(norm<=nu) ? m2 : nu*m2/norm;
             }
         }
     }
 }
 
-__global__ void clipping(float* xn, float* xcur, float* y1, float* y2, float* y3, float tau, int w, int h, int l, int nc)
+__global__ void clipping(float* u,float* ubar,float* p1,float* p2,float* p3,float tau,int w,int h,int l,int nc)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
@@ -221,105 +214,88 @@ __global__ void clipping(float* xn, float* xcur, float* y1, float* y2, float* y3
     
     if (x < w && y < h && z < l)
     {
+        int I;
+        float cur;
+        float d1,d2,d3,D;
         for (int c = 0; c < nc; c++)
         {
-            int i = x + w * y + w * h * z + w * h * l * c;
-            float d1 = y1[i] - (x>0 ? y1[(x-1) + w * y + w * h * z + w * h * l * c] : 0.f);
-            float d2 = y2[i] - (y>0 ? y2[x + w * (y-1) + w * h * z + w * h * l * c] : 0.f);
-            float d3 = y3[i] - (z>0 ? y3[x + w * y + w * h * (z-1) + w * h * l * c] : 0.f);
-            float val = xcur[i] + tau * (d1 + d2 + d3);
-            if (z == 0) {
-                xn[i] = 1.f;
-            } else if (z == l-1) {
-                xn[i] = 0.f;
+            I = x+y*w+z*h*w+c*h*w*l;
+            cur = u[I];
+            d1 = (y+1<h ? p1[I] : 0.f) - (y>0 ? p1[x+(y-1)*w+z*h*w+c*h*w*l] : 0.f);
+            d2 = (x+1<w ? p2[I] : 0.f) - (x>0 ? p2[(x-1)+y*w+z*h*w+c*h*w*l] : 0.f);
+            d3 = (z+1<l ? p3[I] : 0.f) - (z>0 ? p3[x+y*w+(z-1)*h*w+c*h*w*l] : 0.f);
+            D = cur+tau*(d1+d2+d3);
+            if (z==0) {
+                u[I]=1.f;
+            } else if (z==l-1) {
+                u[I]=0.f;
             } else {
-                xn[i] = fmin(1.f, fmax(0.f, val));
+                u[I]=fmin(1.f, fmax(0.f, D));
             }
+            ubar[I] = 2.f * u[I] - cur;
         }
     }
 }
 
-__global__ void update_lambda(float* l1, float* l2, float* l1cur, float* l2cur, float* p1, float* p2, float* y1, float* y2, float tau, int k1, int k2, int K, int w, int h, int l, int nc)
+__global__ void mu(float* mu1,float* mu2,float* mubar1,float* mubar2,float* s1,float* s2,float* p1,float* p2,int w,int h,int l,int proj,int nc)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
     
     if (x < w && y < h)
     {
+        float tau = 1.f / (2.f + (float)(proj/4.f));
+        float t1, t2, c1, c2;
+        int I, J, K;
         for (int c = 0; c < nc; c++)
         {
-            int i = x + w * y + w * h * K + w * h * l * c;
-            int j;
-            
-            float y1tmp = 0.f;
-            float y2tmp = 0.f;
-            
-            for (int k = k1; k <= k2; k++)
-            {
-                j = x + w * y + w * h * k + w * h * l * c;
-                y1tmp += y1[j];
-                y2tmp += y2[j];       
-            }
-            l1[i] = l1cur[i] - tau * (p1[i] - y1tmp);
-            l2[i] = l2cur[i] - tau * (p2[i] - y2tmp);
-        }
-    }
-}
-
-__global__ void extrapolate(float* xbar, float* l1bar, float* l2bar, float* xcur, float* l1cur, float* l2cur, float* xn, float* l1, float* l2, int w, int h, int l, int nc)
-{
-    int x = threadIdx.x + blockDim.x * blockIdx.x;
-    int y = threadIdx.y + blockDim.y * blockIdx.y;
-    
-    if (x < w && y < h) {
-        for (int c = 0; c < nc; c++)
-        {
-            int i, j, K = 0;
+            K = 0;
             for (int k1 = 0; k1 < l; k1++)
             {
-                i = x + w * y + w * h * k1 + w * h * l * c;
                 for (int k2 = k1; k2 < l; k2++)
                 {
-                    j = x + w * y + w * h * K + w * h * l * c;
-                    l1bar[j] = 2.f * l1[j] - l1cur[j];
-                    l2bar[j] = 2.f * l2[j] - l2cur[j];
-                    l1cur[j] = l1[j];
-                    l2cur[j] = l2[j];
+                    I = x+y*w+K*h*w+c*h*w*proj;
+                    c1 = mu1[I]; c2 = mu2[I];
+                    t1 = 0.f; t2 = 0.f;
+                    for (int k = k1; k <= k2; k++)
+                    {
+                        J = x+y*w+k*h*w+c*h*w*l;
+                        t1+=p1[J];
+                        t2+=p2[J];
+                    }
+                    mu1[I] = c1+tau*(s1[I]-t1);
+                    mu2[I] = c2+tau*(s2[I]-t2);
+                    mubar1[I] = 2.f * mu1[I] - c1;
+                    mubar2[I] = 2.f * mu2[I] - c2;
                     K++;
                 }
-                xbar[i] = 2.f * xn[i] - xcur[i];
-                xcur[i] = xn[i];
             }
         }
     }
 }
 
-__global__ void isosurface(float* img, float* xbar, int w, int h, int l, int nc)
+__global__ void isosurface(float* f,float* u,int w,int h,int l,int nc)
 {
     int x = threadIdx.x + blockDim.x * blockIdx.x;
     int y = threadIdx.y + blockDim.y * blockIdx.y;
 
     if (x < w && y < h)
     {
+        float uk0, uk1, val;
         for (int c = 0; c < nc; c++)
         {
-            float val = 0.f;
-            float uk0 = 0.f;
-            float uk1 = 0.f;
-
             for (int k = 0; k < l-1; k++)
             {
-                uk0 = xbar[x + w * y + k * w * h + w * h * l * c];
-                uk1 = xbar[x + w * y + (k+1) * w * h + w * h * l * c];
+                uk0 = u[x+y*w+k*h*w+c*h*w*l];
+                uk1 = u[x+y*w+(k+1)*h*w+c*h*w*l];
                 if (uk0 > 0.5 && uk1 <= 0.5) {
                     val = interpolate(k+1, uk0, uk1, l);
                     break;
                 } else {
-                    val = 1.f;
+                    val = uk1;
                 }
             }
-            
-            img[x + w * y + w * h * c] = val;
+            f[x+y*w+c*h*w] = val;
         }
     }
 }
@@ -331,186 +307,109 @@ int main(int argc, char **argv)
     // We will do it right here, so that the run time measurements are accurate
     cudaDeviceSynchronize();  CUDA_CHECK;
 
-    // Reading command line parameters:
-    // getParam("param", var, argc, argv) looks whether "-param xyz" is specified, and if so stores the value "xyz" in "var"
-    // If "-param" is not specified, the value of "var" remains unchanged
-    //
-    // return value: getParam("param", ...) returns true if "-param" is specified, and false otherwise
-
-#ifdef CAMERA
-#else
+    if (argc <= 3) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> -parm <parameter.txt> [-repeats <repeats>] [-gray]" << endl; return 1; }
+    
     // input image
     string image = "";
     bool ret = getParam("i", image, argc, argv);
     if (!ret) cerr << "ERROR: no image specified" << endl;
-    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> -data <data.txt> -parm <parameter.txt> [-repeats <repeats>] [-gray]" << endl; return 1; }
 
-#endif
-    
-        // output image
+    // output image
     string output = "";
     bool retO = getParam("o", output, argc, argv);
     if (!retO) cerr << "ERROR: no output image specified" << endl;
-    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> -data <data.txt> -parm <parameter.txt> [-repeats <repeats>] [-gray]" << endl; return 1; }
-
-    // energy values
-    string data = "";
-    bool ret1 = getParam("data", data, argc, argv);
-    if (!ret1) cerr << "ERROR: no data file specified" << endl;
-    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> -data <data.txt> -parm <parameter.txt> [-repeats <repeats>] [-gray]" << endl; return 1; }
 
     // parameter values
     string parm = "";
     bool ret2 = getParam("parm", parm, argc, argv);
-    if (!ret2) cerr << "ERROR: no parm file specified" << endl;
-    if (argc <= 1) { cout << "Usage: " << argv[0] << " -i <image> -o <output_image> -data <data.txt> -parm <parameter.txt> [-repeats <repeats>] [-gray]" << endl; return 1; }
 
     // number of computation repetitions to get a better run time measurement
-    int repeats = 1;
+    int repeats = 1000;
     getParam("repeats", repeats, argc, argv);
-    // cout << "repeats: " << repeats << endl;
     
     // load the input image as grayscale if "-gray" is specifed
     bool gray = false;
     getParam("gray", gray, argc, argv);
-    // cout << "gray: " << gray << endl;
 
     // load the input image as grayscale if "-gray" is specifed
     int level = 16;
     getParam("level", level, argc, argv);
-    // cout << "level: " << level << endl;
-
-    // load the input image as grayscale if "-gray" is specifed
-    float taux = 1.f / 6.f;
-    getParam("taux", taux, argc, argv);
-    // cout << "taux: " << taux << endl;
-
-    // load the input image as grayscale if "-gray" is specifed
-    float taul = 1.f;
-    getParam("taul", taul, argc, argv);
-    // cout << "taul: " << taul << endl;
-    
-    // load the input image as grayscale if "-gray" is specifed
-    float sigmay = 1.f / (3.f + level);
-    getParam("sigmay", sigmay, argc, argv);
-    // cout << "sigmay: " << sigmay << endl;
-
-    // load the input image as grayscale if "-gray" is specifed
-    float sigmap = 1.f;
-    getParam("sigmap", sigmap, argc, argv);
-    // cout << "sigmap: " << sigmap << endl;
 
     // load the input image as grayscale if "-gray" is specifed
     float lambda = 0.1f;
     getParam("lambda", lambda, argc, argv);
-    // cout << "lambda: " << lambda << endl;
 
     // load the input image as grayscale if "-gray" is specifed
-    float nu = 5.f;
+    float nu = 0.01f;
     getParam("nu", nu, argc, argv);
-    // nu /= (level*level);
-    // cout << "nu: " << nu << endl;
-
-    // Init camera / Load input image
-#ifdef CAMERA
-
-    // Init camera
-    cv::VideoCapture camera(0);
-    if(!camera.isOpened()) { cerr << "ERROR: Could not open camera" << endl; return 1; }
-    int camW = 640;
-    int camH = 480;
-    camera.set(CV_CAP_PROP_FRAME_WIDTH,camW);
-    camera.set(CV_CAP_PROP_FRAME_HEIGHT,camH);
-    // read in first frame to get the dimensions
-    cv::Mat mIn;
-    camera >> mIn;
-    
-#else
     
     // Load the input image using opencv (load as grayscale if "gray==true", otherwise as is (may be color or grayscale))
     cv::Mat mIn = cv::imread(image.c_str(), (gray? CV_LOAD_IMAGE_GRAYSCALE : -1));
     // check
     if (mIn.data == NULL) { cerr << "ERROR: Could not load image " << image << endl; return 1; }
-    
-#endif
 
     // convert to float representation (opencv loads image values as single bytes by default)
     mIn.convertTo(mIn,CV_32F);
     // convert range of each channel to [0,1] (opencv default is [0,255])
     mIn /= 255.f;
+    // time-steps
+    float nrj;
+    float tauu = 1.f / 6.f;
+    float sigmap = 1.f / (3.f + level);
+    float sigmas = 1.f;
+
     // get image dimensions
+    int iter = 1;
     int w = mIn.cols;         // width
     int h = mIn.rows;         // height
     int nc = mIn.channels();  // number of channels
-    int dim = w*h*nc;
-    int size = w*h*nc*level;
-    int proj = level * (level+1) / 2;
+    
+    // image dimension
+    int dim = h*w*nc;
     int nbyted = dim*sizeof(float);
+    
+    // u, un, ubar, p1, p2, p3 dimension
+    int size = h*w*level*nc;
     int nbytes = size*sizeof(float);
+    
+    // s1, s2, mu1, mu2, mun1, mun2, mubar1, mubar2 dimension
+    int proj = level*(level-1)/2 + level;
     int nbytep = proj*dim*sizeof(float);
 
     cv::Mat mOut(h,w,mIn.type());  // mOut will have the same number of channels as the input image, nc layers
 
     // allocate raw input image array
-    float* h_energy = new float[(size_t)repeats];
-    float* h_imgIn  = new float[(size_t)dim];
-    float* h_imgOut = new float[(size_t)dim];
-    float* h_x1 = new float[(size_t)size];
-    float* h_x2 = new float[(size_t)size];
-    float* h_x3 = new float[(size_t)size];
+    // float* h_u = new float[size];
+    // float* h_un = new float[size];
+    float* h_img  = new float[(size_t)dim];
+    float* h_u  = new float[(size_t)size];
+    float* h_un  = new float[(size_t)size];
 
     // allocate raw input image for GPU
-    float* d_imgInOut; cudaMalloc(&d_imgInOut, nbyted); CUDA_CHECK;
+    float* d_f; cudaMalloc(&d_f, nbyted); CUDA_CHECK;
 
-    float* d_x; cudaMalloc(&d_x, nbytes); CUDA_CHECK;
-    float* d_xbar; cudaMalloc(&d_xbar, nbytes); CUDA_CHECK;
-    float* d_xcur; cudaMalloc(&d_xcur, nbytes); CUDA_CHECK;
+    float* d_u; cudaMalloc(&d_u, nbytes); CUDA_CHECK;
+    float* d_ubar; cudaMalloc(&d_ubar, nbytes); CUDA_CHECK;
 
-    float* d_y1; cudaMalloc(&d_y1, nbytes); CUDA_CHECK;
-    float* d_y2; cudaMalloc(&d_y2, nbytes); CUDA_CHECK;
-    float* d_y3; cudaMalloc(&d_y3, nbytes); CUDA_CHECK;
+    float* d_p1; cudaMalloc(&d_p1, nbytes); CUDA_CHECK;
+    float* d_p2; cudaMalloc(&d_p2, nbytes); CUDA_CHECK;
+    float* d_p3; cudaMalloc(&d_p3, nbytes); CUDA_CHECK;
 
-    float* d_p1; cudaMalloc(&d_p1, nbytep); CUDA_CHECK;
-    float* d_p2; cudaMalloc(&d_p2, nbytep); CUDA_CHECK;
+    float* d_s1; cudaMalloc(&d_s1, nbytep); CUDA_CHECK;
+    float* d_s2; cudaMalloc(&d_s2, nbytep); CUDA_CHECK;
 
-    float* d_lambda1; cudaMalloc(&d_lambda1, nbytep); CUDA_CHECK;
-    float* d_lambda2; cudaMalloc(&d_lambda2, nbytep); CUDA_CHECK;
-
-    float* d_lambda1bar; cudaMalloc(&d_lambda1bar, nbytep); CUDA_CHECK;
-    float* d_lambda2bar; cudaMalloc(&d_lambda2bar, nbytep); CUDA_CHECK;
-
-    float* d_lambda1cur; cudaMalloc(&d_lambda1cur, nbytep); CUDA_CHECK;
-    float* d_lambda2cur; cudaMalloc(&d_lambda2cur, nbytep); CUDA_CHECK;
+    float* d_mu1; cudaMalloc(&d_mu1, nbytep); CUDA_CHECK;
+    float* d_mu2; cudaMalloc(&d_mu2, nbytep); CUDA_CHECK;
+    float* d_mubar1; cudaMalloc(&d_mubar1, nbytep); CUDA_CHECK;
+    float* d_mubar2; cudaMalloc(&d_mubar2, nbytep); CUDA_CHECK;
 
     size_t available, total;
     cudaMemGetInfo(&available, &total);
 
-    // alloc GPU memory
-
-    // For camera mode: Make a loop to read in camera frames
-#ifdef CAMERA
-    // Read a camera image frame every 30 milliseconds:
-    // cv::waitKey(30) waits 30 milliseconds for a keyboard input,
-    // returns a value <0 if no key is pressed during this time, returns immediately with a value >=0 if a key is pressed
-    while (cv::waitKey(30) < 0)
-    {
-    // Get camera image
-    camera >> mIn;
-    // convert to float representation (opencv loads image values as single bytes by default)
-    mIn.convertTo(mIn,CV_32F);
-    // convert range of each channel to [0,1] (opencv default is [0,255])
-    mIn /= 255.f;
-
-#endif
-
     // Init raw input image array
-    // opencv images are interleaved: rgb rgb rgb...  (actually bgr bgr bgr...)
-    // But for CUDA it's better to work with layered images: rrr... ggg... bbb...
-    // So we will convert as necessary, using interleaved "cv::Mat" for loading/saving/displaying, and layered "float*" for CUDA computations
-    convert_mat_to_layered (h_imgIn, mIn);
-
+    convert_mat_to_layered (h_img, mIn);
     // copy host memory
-    cudaMemcpy(d_imgInOut, h_imgIn, nbyted, cudaMemcpyHostToDevice); CUDA_CHECK;
+    cudaMemcpy(d_f,h_img,nbyted,cudaMemcpyHostToDevice); CUDA_CHECK;
 
     // launch kernel
     dim3 block = dim3(32, 8, 4);
@@ -519,129 +418,62 @@ int main(int argc, char **argv)
     dim3 grid_iso = dim3((w + block_iso.x - 1) / block_iso.x, (h + block_iso.y - 1) / block_iso.y, 1);
 
     Timer timer; timer.start();
-
-    int K;
-    float sum = 0.f;
-    float tmp = 0.f;
-    int count = 0;
-
-    init <<<grid_iso, block_iso>>> (d_xbar, d_xcur, d_x, d_y1, d_y2, d_y3, d_p1, d_p2, d_lambda1, d_lambda2, d_lambda1bar, d_lambda2bar, d_lambda1cur, d_lambda2cur, d_imgInOut, w, h, level, proj, nc);
-
-    for (int i = 1; i <= repeats; i++)
+    
+    init <<<grid_iso, block_iso>>> (d_u,d_ubar,d_p1,d_p2,d_p3,d_s1,d_s2,d_mu1,d_mu2,d_mubar1,d_mubar2,d_f,h,w,level,proj,nc);
+    for (iter = 0; iter < repeats; iter++)
     {
-        
-        parabola <<<grid, block>>> (d_y1, d_y2, d_y3, d_lambda1, d_lambda2, d_xbar, d_imgInOut, sigmay, lambda, w, h, level, nc);
-        
-        // DUAL ENERGY
-        cudaMemcpy(h_x1, d_y1, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
-        cudaMemcpy(h_x2, d_y2, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
-        cudaMemcpy(h_x3, d_y3, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
-
-        sum = 0.f;
-        for (int kx = 0; kx < level; kx++)
-        {
-            for (int ix = 0; ix < h; ix++)
-            {
-                for (int jx = 0; jx < w; jx++)
-                {
-                    float x1 = h_x1[jx + w * ix + w * h * kx] - (jx>0 ? h_x1[(jx-1) + w * ix + w * h * kx] : 0.f);
-                    float x2 = h_x2[jx + w * ix + w * h * kx] - (ix>0 ? h_x2[jx + w * (ix-1) + w * h * kx] : 0.f);
-                    float x3 = h_x3[jx + w * ix + w * h * kx] - (kx>0 ? h_x3[jx + w * ix + w * h * (kx-1)] : 0.f);
-                    float d = x1+x2+x3;
-                    if (d > 0) {
-                        sum += 1.f;
-                    }
-                }
-            }
+        parabola <<<grid, block>>> (d_p1,d_p2,d_p3,d_mu1,d_mu2,d_ubar,d_f,sigmap,lambda,w,h,level,proj,nc);
+        l2projection <<<grid_iso, block_iso>>> (d_s1,d_s2,d_mubar1,d_mubar2,sigmas,nu,w,h,level,proj,nc);
+        mu <<<grid_iso, block_iso>>> (d_mu1,d_mu2,d_mubar1,d_mubar2,d_s1,d_s2,d_p1,d_p2,w,h,level,proj,nc);
+        if (iter%10 == 0) cudaMemcpy(h_un, d_u, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+        clipping <<<grid, block>>> (d_u,d_ubar,d_p1,d_p2,d_p3,tauu,w,h,level,nc);
+        if (iter%10 == 0) {
+            cudaMemcpy(h_u, d_u, nbytes, cudaMemcpyDeviceToHost); CUDA_CHECK;
+            nrj = energy(h_u, h_un, size);
+            if (nrj/(w*h*level) <= 5*1E-5) break;
         }
-        if (i%50 == 0) {
-            if (abs(sqrtf(tmp) - sqrtf(sum)) < 1E-6) {
-                break;
-            }
-            tmp = sum;
-        }
-        h_energy[count] = sqrtf(sum);
-        count++;
-        // END DUAL ENERGY
-
-        l2projection <<<grid_iso, block_iso>>> (d_p1, d_p2, d_lambda1bar, d_lambda2bar, sigmap, nu, w, h, level, nc);
-        
-        K = 0;
-        for (int k1 = 0; k1 < level; k1++)
-        {
-            for (int k2 = k1; k2 < level; k2++)
-            {
-                taul = 1.f / (2.f + k2 - k1);
-                update_lambda <<<grid_iso, block_iso>>> (d_lambda1, d_lambda2, d_lambda1cur, d_lambda2cur, d_p1, d_p2, d_y1, d_y2, taul, k1, k2, K, w, h, level, nc);
-                K++;
-            }
-        }
-
-        clipping <<<grid, block>>> (d_x, d_xcur, d_y1, d_y2, d_y3, taux, w, h, level, nc);
-        
-        extrapolate <<<grid_iso, block_iso>>> (d_xbar, d_lambda1bar, d_lambda2bar, d_xcur, d_lambda1cur, d_lambda2cur, d_x, d_lambda1, d_lambda2, w, h, level, nc);
     }
-
-    isosurface <<<grid_iso, block_iso>>> (d_imgInOut, d_x, w, h, level, nc);
+    isosurface <<<grid_iso, block_iso>>> (d_f,d_u,w,h,level,nc);
 
     timer.end();  float t = timer.get();  // elapsed time in seconds
 
-    cudaMemcpy(h_imgOut, d_imgInOut, nbyted, cudaMemcpyDeviceToHost); CUDA_CHECK;
-    dualEnergy(data, h_energy, count);
-    parameter(parm, repeats, gray, level, taux, taul, sigmay, sigmap, lambda, nu, w, h, nc, available, total, t);
+    cudaMemcpy(h_img,d_f,nbyted,cudaMemcpyDeviceToHost); CUDA_CHECK;
 
-    // show input image
-    showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
+    if (!ret2) {
+        parameterToConsole(parm,repeats,gray,level,tauu,1.f,sigmap,sigmas,lambda,nu,w,h,nc,available,total,t,iter);
+    } else {
+        parameterToFile(parm,repeats,gray,level,tauu,1.f,sigmap,sigmas,lambda,nu,w,h,nc,available,total,t,iter);
+    }
 
     // show output image: first convert to interleaved opencv format from the layered raw array
-    convert_layered_to_mat(mOut, h_imgOut);
-    showImage("Output", mOut, 100+w+40, 100);
-
-    // ### Display your own output images here as needed
-
-#ifdef CAMERA
-    // end of camera loop
-    }
-#else
-    // wait for key inputs
-    cv::waitKey(0);
-#endif
+    // showImage("Input", mIn, 100, 100);  // show at position (x_from_left=100,y_from_above=100)
+    convert_layered_to_mat(mOut,h_img);
+    // showImage("Output", mOut, 100+w+40, 100);
 
     // save input and result
-    // cv::imwrite("image_input.png",mIn*255.f);  // "imwrite" assumes channel range [0,255]
-    cv::imwrite(output, mOut*255.f);
+    cv::imwrite(output,mOut*255.f);
 
     // free GPU memory
-    cudaFree(d_imgInOut); CUDA_CHECK;
+    cudaFree(d_f); CUDA_CHECK;
     
-    cudaFree(d_x); CUDA_CHECK;
-    cudaFree(d_xbar); CUDA_CHECK;
-    cudaFree(d_xcur); CUDA_CHECK;
-
-    cudaFree(d_y1); CUDA_CHECK;
-    cudaFree(d_y2); CUDA_CHECK;
-    cudaFree(d_y3); CUDA_CHECK;
+    cudaFree(d_u); CUDA_CHECK;
+    cudaFree(d_ubar); CUDA_CHECK;
 
     cudaFree(d_p1); CUDA_CHECK;
     cudaFree(d_p2); CUDA_CHECK;
+    cudaFree(d_p3); CUDA_CHECK;
 
-    cudaFree(d_lambda1); CUDA_CHECK;
-    cudaFree(d_lambda2); CUDA_CHECK;
+    cudaFree(d_s1); CUDA_CHECK;
+    cudaFree(d_s2); CUDA_CHECK;
 
-    cudaFree(d_lambda1bar); CUDA_CHECK;
-    cudaFree(d_lambda2bar); CUDA_CHECK;
-    
-    cudaFree(d_lambda1cur); CUDA_CHECK;
-    cudaFree(d_lambda2cur); CUDA_CHECK;
+    cudaFree(d_mu1); CUDA_CHECK;
+    cudaFree(d_mu2); CUDA_CHECK;
+    cudaFree(d_mubar1); CUDA_CHECK;
+    cudaFree(d_mubar2); CUDA_CHECK;
 
     // free allocated arrays
-    delete[] h_imgIn;
-    delete[] h_imgOut;
-    delete[] h_energy;
-    delete[] h_x1;
-    delete[] h_x2;
-    delete[] h_x3;
-    // close all opencv windows
-    cvDestroyAllWindows();
+    delete[] h_u;
+    delete[] h_un;
+    delete[] h_img;
     return 0;
 }

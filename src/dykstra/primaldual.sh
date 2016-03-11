@@ -19,12 +19,12 @@ nrj="data.txt"
 img="../../img/"
 res="./results/"
 
-for file in "synth" "ladama" "marylin" "synth_gauss" "crack_tip" "inpaint";
+for file in "ladama" # "marylin" "synth_gauss" "crack_tip" "inpaint";
 do
 	par=$res$file"/parameter.txt"
 	out=$res$file"/dual_energy.png"
-	./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 16 -repeats 1000 -dykstra 100 -nu 0.01 -lambda 0.11
+	./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 24 -repeats 10000 -dykstra 1000 -nu 0.01 -lambda 0.1
 	gnuplot -e "outfile='"$out"'" -e "datafile='data.txt'" plot.gpl
 done
-rm data.txt
-rm ./primaldual
+# rm data.txt
+# rm ./primaldual

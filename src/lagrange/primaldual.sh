@@ -6,31 +6,15 @@
 
 make
 
-# -level 16 -repeats 1000 -nu 0.01 -lambda 0.11 > "../results/lena.txt"
-# -level 16 -repeats 1000 -nu 0.01 -lambda 0.11 > "../results/lena_noise.txt"
-# -level 20 -repeats 100000 -nu 0.01 -lambda 0.11 > "../results/lena_noisy.txt"
-# -level 20 -repeats 1 -nu 0.01 -lambda 0.1 > "../results/hepburn.txt"
-# -level 8 -repeats 10000 -nu 0.01 -lambda 0.1 > "../results/ladama/data.txt"
-# -level 8 -repeats 10000 -nu 0.001 -lambda 0.1 > "../results/marylin/data.txt"
-# -level 8 -repeats 10000 -nu 0.01 -lambda 0.11 > "../results/synth_gauss/data.txt"
-# -level 32 -repeats 10000 -nu 0.01 -lambda 0.1 > "../results/crack_tip/data.txt"
-# -level 16 -repeats 10000 -nu 0.0001 -lambda 0.1 > "../results/synth/data.txt"
-
-# file="synth_gauss"
-# ./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 16 -repeats 10000 -nu 0.01 -lambda 0.11
-
-nrj="data.txt"
-img="../../img/"
-res="./results/"
-
-# for file in "synth" "lena" "lena_noisy" "hepburn" "ladama" "marylin" "synth_gauss" "crack_tip" "inpaint";
-# for file in "hepburnc" "blue" "gaudi" "lake" "landscape" "marble" "squirrel" "van_gogh";
-for file in "synth" "lena" "lena_noisy" "hepburn" "ladama" "marylin" "synth_gauss" "crack_tip" "inpaint";
+for i in "0.01" "0.02" "0.03" "0.04" "0.05" "0.06" "0.07" "0.08" "0.09" "0.1" "0.2" "0.3" "0.4" "0.5" "0.6" "0.7" "0.8" "0.9" "1.0"
 do
-	par=$res$file"/parameter.txt"
-	out=$res$file"/dual_energy.png"
-	./primaldual -i $img$file".png" -o $res$file"/"$file".png" -data $nrj -parm $par -level 16 -repeats 1000 -nu 0.01 -lambda 0.1 -gray
-	gnuplot -e "outfile='"$out"'" -e "datafile='data.txt'" plot.gpl
+	for j in "0.01" "0.02" "0.03" "0.04" "0.05" "0.06" "0.07" "0.08" "0.09" "0.1" "0.2" "0.3" "0.4" "0.5" "0.6" "0.7" "0.8" "0.9" "1.0"
+	do
+		echo $i" "$j
+		./primaldual -i "../../img/ladama.png" -o "../../tests/parameter/lagrange/ladama/"$i"ladama"$j".png" -repeats 10000 -lambda $i -nu $j -gray -level 16 >> "../../tests/parameter/lagrange/ladama/output.txt"
+		./primaldual -i "../../img/synth.png" -o "../../tests/parameter/lagrange/synth/"$i"synth"$j".png" -repeats 10000 -lambda $i -nu $j -gray -level 16 >> "../../tests/parameter/lagrange/synth/output.txt"
+		./primaldual -i "../../img/synth_gauss.png" -o "../../tests/parameter/lagrange/synth_gauss/"$i"synth_gauss"$j".png" -repeats 10000 -lambda $i -nu $j -gray -level 16 >> "../../tests/parameter/lagrange/synth_gauss/output.txt"
+		./primaldual -i "../../img/crack_tip.png" -o "../../tests/parameter/lagrange/crack_tip/"$i"crack_tip"$j".png" -repeats 10000 -lambda $i -nu $j -gray -level 16 >> "../../tests/parameter/lagrange/crack_tip/output.txt"
+		./primaldual -i "../../img/hepburn.png" -o "../../tests/parameter/lagrange/hepburn/"$i"hepburn"$j".png" -repeats 10000 -lambda $i -nu $j -gray -level 16 >> "../../tests/parameter/lagrange/hepburn/output.txt"
+	done
 done
-rm data.txt
-rm ./primaldual
